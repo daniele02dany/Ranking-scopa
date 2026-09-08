@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ranking Scopa</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <main class="app">
+
+    <section id="welcomeScreen" class="screen active">
+      <div class="logo-symbol">♠</div>
+
+      <h1>RANKING SCOPA</h1>
+      <p class="subtitle">THE TABLE IS WAITING</p>
+
+      <button id="enterButton" class="primary-button">
+        ENTRA AL TAVOLO
+      </button>
+    </section>
+
+
+    <section id="playerScreen" class="screen">
+      <h2>CHI SEI?</h2>
+
+      <div id="playerList" class="player-list">
+      </div>
+    </section>
+
+
+<section id="homeScreen" class="screen">
+
+  <p class="small-label">BENVENUTO</p>
+
+  <h2 id="welcomePlayerName">
+    GIOCATORE
+  </h2>
+
+  <button id="newMatchButton" class="primary-button">
+    ♠ NUOVA PARTITA
+  </button>
+
+</section>
+
+<section id="newMatchScreen" class="screen">
+
+  <p class="small-label">NUOVO TAVOLO</p>
+
+  <h2>CHI GIOCA?</h2>
+
+  <p class="selection-info">
+    Seleziona almeno 4 giocatori
+  </p>
+
+  <div id="matchPlayerList" class="player-list">
+  </div>
+
+  <button id="drawButton" class="primary-button match-action">
+    🎲 SORTEGGIA
+  </button>
+
+  <button id="backHomeButton" class="secondary-button">
+    ← INDIETRO
+  </button>
+
+</section>
+
+<section id="drawResultScreen" class="screen">
+
+  <p class="small-label">IL TAVOLO È PRONTO</p>
+
+  <h2>🎲 SORTEGGIO</h2>
+
+  <div class="team-card">
+    <span class="team-symbol">♠</span>
+    <p class="team-label">TEAM BLACK</p>
+
+    <h3 id="teamAPlayers">
+      -
+    </h3>
+  </div>
+
+  <div class="versus">
+    VS
+  </div>
+
+  <div class="team-card red-team">
+    <span class="team-symbol">♥</span>
+    <p class="team-label">TEAM RED</p>
+
+    <h3 id="teamBPlayers">
+      -
+    </h3>
+  </div>
+
+  <div class="excluded-box">
+
+    <p class="small-label">
+      FUORI DAL TAVOLO
+    </p>
+
+    <p id="excludedPlayers">
+      Nessuno
+    </p>
+
+  </div>
+
+  <button id="redrawButton" class="primary-button match-action">
+    🔄 RISORTEGGIA
+  </button>
+
+  <button id="startMatchButton" class="secondary-button">
+    ♠ INIZIA PARTITA
+  </button>
+
+  <button id="cancelDrawButton" class="text-button">
+    ANNULLA
+  </button>
+
+</section>
+
+  </main>
+
+
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+
+  <script src="firebase-config.js"></script>
+  <script src="app.js"></script>
+
+</body>
+</html>

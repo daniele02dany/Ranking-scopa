@@ -105,6 +105,7 @@ const activeTeamBPlayers = document.getElementById("activeTeamBPlayers");
 const activeExcludedPlayers = document.getElementById("activeExcludedPlayers");
 const activeMatchSeason = document.getElementById("activeMatchSeason");
 const enterResultButton = document.getElementById("enterResultButton");
+const correctResultButton = document.getElementById('correctResultButton');
 const resultMessage = document.getElementById("resultMessage");
 let isCreatingMatch = false;
 let currentMatch = null;
@@ -510,16 +511,36 @@ async function startMatch() {
 }
 
 startMatchButton.addEventListener("click", startMatch);
-enterResultButton.addEventListener("click", () => {
-  if (!currentMatch || currentMatch.status !== 'in_progress') return;
+function openResultForm(mode) {
+  if (isClosingMatch || !currentMatch || currentMatch.createdByUid !== auth.currentUser?.uid) return;
+  const correcting = mode === 'correction';
+  if (currentMatch.status !== (correcting ? 'completed' : 'in_progress')) return;
+  resultMode = mode;
+  correctionBasis = correcting ? {
+    id: currentMatch.id,
+    scoreA: currentMatch.scoreA,
+    scoreB: currentMatch.scoreB,
+    correctionCount: currentMatch.correctionCount || 0
+  } : null;
   resultForm.reset();
+  if (correcting) {
+    scoreAInput.value = currentMatch.scoreA;
+    scoreBInput.value = currentMatch.scoreB;
+  }
+  document.getElementById('resultFormTitle').textContent = correcting ? 'CORREGGI RISULTATO' : 'INSERISCI RISULTATO';
+  document.getElementById('resultFormHelp').textContent = correcting
+    ? `Risultato registrato: ${currentMatch.scoreA} – ${currentMatch.scoreB}. La correzione sostituisce questo risultato e aggiorna i punti della stessa partita.`
+    : 'Inserisci i punti finali, anche superiori a 21. Controlla squadre e punteggi prima di confermare.';
+  confirmResultButton.textContent = correcting ? 'CONFERMA CORREZIONE' : 'CONFERMA RISULTATO';
   document.getElementById('scoreTeamA').textContent = currentMatch.teamA.join(' + ');
   document.getElementById('scoreTeamB').textContent = currentMatch.teamB.join(' + ');
   resultSaveMessage.textContent = '';
   updateResultPreview();
   showScreen(resultScreen);
   scoreAInput.focus();
-});
+}
+enterResultButton.addEventListener('click', () => openResultForm('create'));
+correctResultButton.addEventListener('click', () => openResultForm('correction'));
 const resultScreen = document.getElementById('resultScreen');
 const resultForm = document.getElementById('resultForm');
 const scoreAInput = document.getElementById('scoreA');
@@ -531,6 +552,8 @@ const cancelResultButton = document.getElementById('cancelResultButton');
 const historyMonth = document.getElementById('historyMonth');
 const rankingMonth = document.getElementById('rankingMonth');
 let isClosingMatch = false;
+let resultMode = 'create';
+let correctionBasis = null;
 let homeRequest = 0;
 let historyRequest = 0;
 let rankingRequest = 0;
@@ -561,6 +584,18 @@ function updateResultPreview() {
   try {
     const result = readResult();
     resultPreview.textContent = resultDescription({ ...currentMatch, ...result });
+    if (resultMode === 'correction' && correctionBasis) {
+      if (result.scoreA === correctionBasis.scoreA && result.scoreB === correctionBasis.scoreB) {
+        resultPreview.textContent = 'Il risultato è invariato. Modifica almeno uno dei due punteggi per correggerlo.';
+        confirmResultButton.disabled = true;
+        return;
+      }
+      const before = calculateResult(correctionBasis.scoreA, correctionBasis.scoreB);
+      const changeA = (result.winnerTeam === 'A' ? result.ratingDelta : -result.ratingDelta)
+        - (before.winnerTeam === 'A' ? before.ratingDelta : -before.ratingDelta);
+      const signed = points => points > 0 ? `+${points}` : points < 0 ? `−${Math.abs(points)}` : '0';
+      resultPreview.textContent += ` Rispetto alla classifica attuale: ${currentMatch.teamA.join(' + ')} ${signed(changeA)} punti ciascuno; ${currentMatch.teamB.join(' + ')} ${signed(-changeA)} punti ciascuno.`;
+    }
     confirmResultButton.disabled = isClosingMatch;
   } catch (error) {
     resultPreview.textContent = error.message;
@@ -578,6 +613,11 @@ function openMatch(match) {
   document.getElementById('activeMatchTitle').textContent = completed ? 'PARTITA CONCLUSA' : 'PARTITA IN CORSO';
   document.getElementById('activeMatchScore').textContent = completed ? `${match.scoreA} – ${match.scoreB}` : '';
   enterResultButton.hidden = completed || match.createdByUid !== auth.currentUser?.uid;
+  correctResultButton.hidden = !completed || match.createdByUid !== auth.currentUser?.uid;
+  document.getElementById('activeMatchNotice').textContent = '';
+  document.getElementById('correctionInfo').textContent = completed && match.correctionCount
+    ? `Risultato corretto ${match.correctionCount} ${match.correctionCount === 1 ? 'volta' : 'volte'}. Prima dell’ultima correzione: ${match.previousResult.scoreA} – ${match.previousResult.scoreB}.`
+    : '';
   resultMessage.textContent = completed ? resultDescription(match) :
     match.createdByUid !== auth.currentUser?.uid ? 'Il risultato va inserito dal dispositivo che ha creato la partita.' : '';
   showScreen(matchInProgressScreen);
@@ -594,17 +634,51 @@ async function closeMatch(event) {
     return;
   }
   const matchId = currentMatch.id;
+  const correcting = resultMode === 'correction';
+  const expected = correctionBasis;
+  if (correcting && (!expected || expected.id !== matchId)) return;
+  if (correcting && expected.scoreA === result.scoreA && expected.scoreB === result.scoreB) {
+    resultSaveMessage.textContent = 'Il risultato è invariato: nessuna modifica da salvare.';
+    return;
+  }
   isClosingMatch = true;
   [confirmResultButton, cancelResultButton, scoreAInput, scoreBInput].forEach(element => element.disabled = true);
-  resultSaveMessage.textContent = 'Salvataggio del risultato…';
+  resultSaveMessage.textContent = correcting ? 'Salvataggio della correzione…' : 'Salvataggio del risultato…';
   try {
     const reference = db.collection('matches').doc(matchId);
     const saved = await db.runTransaction(async transaction => {
       const snapshot = await transaction.get(reference);
       if (!snapshot.exists) throw new Error('La partita non esiste più.');
       const match = snapshot.data();
+      if (match.createdByUid !== user.uid) throw new Error('Non puoi modificare questa partita.');
+      if (correcting) {
+        if (match.status !== 'completed') throw new Error('La partita non risulta conclusa. Riaprila dalla Home.');
+        const latest = { ...match, id: matchId };
+        // Se una richiesta precedente è già riuscita, non crea una nuova correzione.
+        if (match.scoreA === result.scoreA && match.scoreB === result.scoreB) {
+          return { match: latest, outcome: 'unchanged' };
+        }
+        if (match.scoreA !== expected.scoreA || match.scoreB !== expected.scoreB ||
+            (match.correctionCount || 0) !== expected.correctionCount) {
+          return { match: latest, outcome: 'conflict' };
+        }
+        const update = {
+          ...result,
+          correctionCount: (match.correctionCount || 0) + 1,
+          previousResult: {
+            scoreA: match.scoreA,
+            scoreB: match.scoreB,
+            winnerTeam: match.winnerTeam,
+            ratingDelta: match.ratingDelta
+          },
+          correctedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          correctedByUid: user.uid
+        };
+        transaction.update(reference, update);
+        return { match: { ...latest, ...update }, outcome: 'corrected' };
+      }
       // La lettura nella transazione impedisce due chiusure anche da schede diverse.
-      if (match.status === 'completed') return { ...match, id: matchId };
+      if (match.status === 'completed') return { match: { ...match, id: matchId }, outcome: 'unchanged' };
       if (match.status !== 'in_progress' || match.createdByUid !== user.uid) throw new Error('Non puoi concludere questa partita.');
       const update = {
         ...result,
@@ -613,13 +687,17 @@ async function closeMatch(event) {
         completedByUid: user.uid
       };
       transaction.update(reference, update);
-      return { ...match, ...update, id: matchId };
+      return { match: { ...match, ...update, id: matchId }, outcome: 'completed' };
     });
-    openMatch(saved);
+    openMatch(saved.match);
+    document.getElementById('activeMatchNotice').textContent = saved.outcome === 'conflict'
+      ? 'Il risultato è stato modificato da un’altra scheda mentre lo correggevi. La tua correzione non è stata salvata. Qui vedi il risultato aggiornato: controllalo e premi CORREGGI RISULTATO se serve.'
+      : saved.outcome === 'corrected' ? 'Correzione salvata. Classifica e storico useranno il nuovo risultato.'
+      : saved.outcome === 'unchanged' ? 'Questo risultato è già stato salvato. Non sono stati assegnati altri punti.' : '';
   } catch (error) {
     console.error('Errore salvataggio risultato:', error);
     resultSaveMessage.textContent = error.code === 'permission-denied'
-      ? 'Pubblica le nuove regole Firestore per autorizzare la chiusura, poi riprova. I punteggi inseriti sono ancora qui.'
+      ? `Pubblica le nuove regole Firestore per autorizzare ${correcting ? 'la correzione' : 'la chiusura'}, poi riprova. I punteggi inseriti sono ancora qui.`
       : `Risultato non salvato. ${error.code ? 'Controlla la connessione e riprova.' : error.message}`;
   } finally {
     isClosingMatch = false;
@@ -654,6 +732,9 @@ function renderMatches(container, matches, emptyText) {
     card.appendChild(textElement('p', date ? date.toLocaleString('it-IT', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : match.seasonId, 'small-label'));
     card.appendChild(textElement('p', `${match.teamA.join(' + ')} / ${match.teamB.join(' + ')}`));
     card.appendChild(textElement('strong', match.status === 'completed' ? `${match.scoreA} – ${match.scoreB} · ±${match.ratingDelta} punti` : 'In corso'));
+    if (match.correctionCount) {
+      card.appendChild(textElement('p', `Corretto · prima ${match.previousResult.scoreA} – ${match.previousResult.scoreB}`, 'correction-note'));
+    }
     const button = textElement('button', match.status === 'completed' ? 'VEDI RISULTATO' : 'APRI PARTITA', 'secondary-button');
     button.type = 'button';
     button.addEventListener('click', () => openMatch(match));

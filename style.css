@@ -354,3 +354,6 @@ button:disabled {
 .rating-value { color: #f3d57a; }
 .team-card h3, .match-summary p, .ranking-row strong { overflow-wrap: anywhere; }
 button:focus-visible, input:focus-visible { outline: 2px solid #f3d57a; outline-offset: 3px; }
+
+.correction-note { color: #c3b59c; font-size: 13px; line-height: 1.6; margin-top: 12px; }
+.correction-note:empty { display: none; }

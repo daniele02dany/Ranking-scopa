@@ -31,15 +31,11 @@ service cloud.firestore {
           && data.status == 'in_progress';
       }
 
-      function validResult() {
+      function validScore() {
         let data = request.resource.data;
         let gap = data.scoreA > data.scoreB
           ? data.scoreA - data.scoreB : data.scoreB - data.scoreA;
-        return data.diff(resource.data).affectedKeys().hasOnly([
-            'status', 'scoreA', 'scoreB', 'winnerTeam', 'ratingDelta',
-            'completedAt', 'completedByUid'
-          ])
-          && data.status == 'completed'
+        return data.status == 'completed'
           && data.scoreA is int && data.scoreA >= 0
           && data.scoreB is int && data.scoreB >= 0
           // Precisione intera JavaScript: nessun tetto sportivo ai punti.
@@ -50,17 +46,48 @@ service cloud.firestore {
           && data.winnerTeam == (data.scoreA > data.scoreB ? 'A' : 'B')
           && data.ratingDelta is int
           && data.ratingDelta == 20 + gap
-          && data.ratingDelta <= 9007199254740991
+          && data.ratingDelta <= 9007199254740991;
+      }
+
+      function validCompletion() {
+        let data = request.resource.data;
+        return resource.data.status == 'in_progress'
+          && data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'scoreA', 'scoreB', 'winnerTeam', 'ratingDelta',
+            'completedAt', 'completedByUid'
+          ])
+          && validScore()
           && data.completedByUid == request.auth.uid
           && data.completedAt == request.time;
+      }
+
+      function validCorrection() {
+        let data = request.resource.data;
+        let previous = resource.data;
+        return previous.status == 'completed'
+          && data.diff(previous).affectedKeys().hasOnly([
+            'scoreA', 'scoreB', 'winnerTeam', 'ratingDelta',
+            'correctionCount', 'previousResult', 'correctedAt', 'correctedByUid'
+          ])
+          && validScore()
+          && (data.scoreA != previous.scoreA || data.scoreB != previous.scoreB)
+          && data.correctionCount is int
+          && data.correctionCount == previous.get('correctionCount', 0) + 1
+          && data.previousResult == {
+            'scoreA': previous.scoreA,
+            'scoreB': previous.scoreB,
+            'winnerTeam': previous.winnerTeam,
+            'ratingDelta': previous.ratingDelta
+          }
+          && data.correctedByUid == request.auth.uid
+          && data.correctedAt == request.time;
       }
 
       allow read: if request.auth != null;
       allow create: if request.auth != null && validNewMatch();
       allow update: if request.auth != null
         && resource.data.createdByUid == request.auth.uid
-        && resource.data.status == 'in_progress'
-        && validResult();
+        && (validCompletion() || validCorrection());
       allow delete: if false;
     }
   }

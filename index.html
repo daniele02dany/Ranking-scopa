@@ -202,13 +202,16 @@
   </div>
   <button id="enterResultButton" class="primary-button match-action">INSERISCI RISULTATO</button>
   <p id="resultMessage" class="match-message" role="status" aria-live="polite"></p>
+  <p id="correctionInfo" class="correction-note"></p>
+  <p id="activeMatchNotice" class="match-message" role="status" aria-live="polite"></p>
+  <button id="correctResultButton" class="secondary-button" hidden>CORREGGI RISULTATO</button>
   <button class="secondary-button" data-go-home>TORNA ALLA HOME</button>
 </section>
 
 <section id="resultScreen" class="screen">
   <p class="small-label">PARTITA AI 21</p>
-  <h2>INSERISCI RISULTATO</h2>
-  <p class="selection-info">Inserisci i punti finali, anche superiori a 21. Il risultato confermato è definitivo.</p>
+  <h2 id="resultFormTitle">INSERISCI RISULTATO</h2>
+  <p id="resultFormHelp" class="selection-info">Inserisci i punti finali, anche superiori a 21. Controlla squadre e punteggi prima di confermare.</p>
   <form id="resultForm" novalidate>
     <div class="team-card score-card">
       <label for="scoreA">♠ TEAM BLACK</label>

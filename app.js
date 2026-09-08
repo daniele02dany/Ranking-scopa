@@ -107,6 +107,9 @@ const activeMatchSeason = document.getElementById("activeMatchSeason");
 const enterResultButton = document.getElementById("enterResultButton");
 const correctResultButton = document.getElementById('correctResultButton');
 const resultMessage = document.getElementById("resultMessage");
+const bottomNav = document.getElementById('bottomNav');
+const draftResumeBar = document.getElementById('draftResumeBar');
+let pausedResult = null;
 let isCreatingMatch = false;
 let currentMatch = null;
 
@@ -114,6 +117,85 @@ let currentMatch = null;
 function showScreen(screen) {
   document.querySelectorAll('.screen').forEach(item => item.classList.remove('active'));
   screen.classList.add("active");
+  updateNavigationState(screen);
+  window.scrollTo({top: 0, behavior: 'auto'});
+  screen.tabIndex = -1;
+  screen.focus({preventScroll: true});
+}
+
+function updateNavigationState(screen = document.querySelector('.screen.active')) {
+  const section = {
+    homeScreen: 'home', rankingScreen: 'ranking', historyScreen: 'history',
+    newMatchScreen: 'play', drawResultScreen: 'play',
+    playersScreen: 'players', playerProfileScreen: 'players',
+    matchInProgressScreen: currentMatch?.status === 'completed' ? 'history' : 'play',
+    resultScreen: resultMode === 'correction' ? 'history' : 'play'
+  }[screen?.id];
+  bottomNav.hidden = !section;
+  document.body.classList.toggle('has-navigation', Boolean(section));
+  bottomNav.querySelectorAll('[data-nav]').forEach(button => {
+    if (button.dataset.nav === section) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
+  draftResumeBar.hidden = !section || !pausedResult || screen?.id === 'resultScreen';
+  document.body.classList.toggle('has-result-draft', !draftResumeBar.hidden);
+  updateNavigationLock();
+}
+
+function updateNavigationLock() {
+  const busy = isCreatingMatch || isClosingMatch;
+  bottomNav.setAttribute('aria-busy', String(busy));
+  document.querySelectorAll('#bottomNav button, #draftResumeBar button').forEach(button => button.disabled = busy);
+}
+
+function pauseResultForm() {
+  if (!resultScreen.classList.contains('active')) return;
+  const changed = resultMode === 'correction'
+    ? scoreAInput.value !== String(correctionBasis.scoreA) || scoreBInput.value !== String(correctionBasis.scoreB)
+    : scoreAInput.value !== '' || scoreBInput.value !== '';
+  pausedResult = changed ? {
+    match: currentMatch, mode: resultMode, basis: correctionBasis,
+    scoreA: scoreAInput.value, scoreB: scoreBInput.value
+  } : null;
+}
+
+function resumeResultForm() {
+  if (!pausedResult || isCreatingMatch || isClosingMatch) return;
+  const draft = pausedResult;
+  if (draft.match.createdByUid !== auth.currentUser?.uid) return;
+  pausedResult = null;
+  currentMatch = draft.match;
+  openResultForm(draft.mode);
+  correctionBasis = draft.basis;
+  scoreAInput.value = draft.scoreA;
+  scoreBInput.value = draft.scoreB;
+  updateResultPreview();
+}
+
+function navigateTo(destination) {
+  if (isCreatingMatch || isClosingMatch || !auth.currentUser || !localStorage.getItem('rankingScopaPlayer')) return;
+  pauseResultForm();
+  if (destination === 'home') {
+    showScreen(homeScreen);
+    refreshHome();
+  } else if (destination === 'play') {
+    if (pausedResult) { resumeResultForm(); return; }
+    if (currentDraw) { showDraw(currentDraw); return; }
+    if (!matchPlayerList.childElementCount) createMatchPlayerList();
+    showScreen(newMatchScreen);
+  } else if (destination === 'ranking') {
+    if (!rankingMonth.value) rankingMonth.value = getSeasonId();
+    showScreen(document.getElementById('rankingScreen'));
+    refreshRanking();
+  } else if (destination === 'history') {
+    if (!historyMonth.value) historyMonth.value = getSeasonId();
+    showScreen(document.getElementById('historyScreen'));
+    refreshHistory();
+  } else if (destination === 'players') {
+    if (!playersMonth.value) playersMonth.value = getSeasonId();
+    showScreen(document.getElementById('playersScreen'));
+    refreshPlayers();
+  }
 }
 
 let availablePlayers = [];
@@ -249,24 +331,8 @@ function createMatchPlayerList() {
   });
 
 }
-newMatchButton.addEventListener(
-  "click",
-  () => {
-
-    createMatchPlayerList();
-
-    showScreen(newMatchScreen);
-
-  }
-);
-backHomeButton.addEventListener(
-  "click",
-  () => {
-
-    showScreen(homeScreen);
-
-  }
-);
+newMatchButton.addEventListener('click', () => navigateTo('play'));
+backHomeButton.addEventListener('click', () => navigateTo('home'));
 function secureRandomInt(max) {
 
   if (max <= 0) {
@@ -478,6 +544,7 @@ async function startMatch() {
   }
 
   isCreatingMatch = true;
+  updateNavigationLock();
   [startMatchButton, redrawButton, cancelDrawButton].forEach(button => button.disabled = true);
   startMatchButton.textContent = "SALVATAGGIO…";
   matchSaveMessage.textContent = "Salvataggio in corso. Attendi la conferma e mantieni la connessione attiva.";
@@ -497,6 +564,7 @@ async function startMatch() {
     currentMatch = { ...match, id: reference.id };
     previousDraw = currentDraw;
     currentDraw = null;
+    matchPlayerList.replaceChildren();
     openMatch(currentMatch);
   } catch (error) {
     console.error("Errore creazione partita:", error);
@@ -505,6 +573,7 @@ async function startMatch() {
       : "Partita non salvata. Controlla la connessione e riprova: il sorteggio è rimasto invariato.";
   } finally {
     isCreatingMatch = false;
+    updateNavigationLock();
     [startMatchButton, redrawButton, cancelDrawButton].forEach(button => button.disabled = false);
     startMatchButton.textContent = "♠ INIZIA PARTITA";
   }
@@ -513,6 +582,11 @@ async function startMatch() {
 startMatchButton.addEventListener("click", startMatch);
 function openResultForm(mode) {
   if (isClosingMatch || !currentMatch || currentMatch.createdByUid !== auth.currentUser?.uid) return;
+  if (pausedResult) {
+    if (pausedResult.match.id === currentMatch.id && pausedResult.mode === mode) resumeResultForm();
+    else document.getElementById('activeMatchNotice').textContent = 'Hai un risultato non salvato per un’altra partita. Premi RIPRENDI nella barra in basso e confermalo oppure torna alla partita per annullare il modulo.';
+    return;
+  }
   const correcting = mode === 'correction';
   if (currentMatch.status !== (correcting ? 'completed' : 'in_progress')) return;
   resultMode = mode;
@@ -642,6 +716,7 @@ async function closeMatch(event) {
     return;
   }
   isClosingMatch = true;
+  updateNavigationLock();
   [confirmResultButton, cancelResultButton, scoreAInput, scoreBInput].forEach(element => element.disabled = true);
   resultSaveMessage.textContent = correcting ? 'Salvataggio della correzione…' : 'Salvataggio del risultato…';
   try {
@@ -701,6 +776,7 @@ async function closeMatch(event) {
       : `Risultato non salvato. ${error.code ? 'Controlla la connessione e riprova.' : error.message}`;
   } finally {
     isClosingMatch = false;
+    updateNavigationLock();
     [cancelResultButton, scoreAInput, scoreBInput].forEach(element => element.disabled = false);
     updateResultPreview();
   }
@@ -851,21 +927,95 @@ resultForm.addEventListener('submit', closeMatch);
 [scoreAInput,scoreBInput].forEach(input => input.addEventListener('input',updateResultPreview));
 cancelResultButton.addEventListener('click', () => { if (!isClosingMatch) openMatch(currentMatch); });
 document.querySelectorAll('[data-go-home]').forEach(button => button.addEventListener('click', () => {
-  showScreen(homeScreen);
-  refreshHome();
+  navigateTo('home');
 }));
 document.getElementById('refreshHomeButton').addEventListener('click',refreshHome);
-rankingButton.addEventListener('click', () => {
-  rankingMonth.value = getSeasonId();
-  showScreen(document.getElementById('rankingScreen'));
-  refreshRanking();
-});
-historyButton.addEventListener('click', () => {
-  historyMonth.value = getSeasonId();
-  showScreen(document.getElementById('historyScreen'));
-  refreshHistory();
-});
+rankingButton.addEventListener('click', () => navigateTo('ranking'));
+historyButton.addEventListener('click', () => navigateTo('history'));
 historyMonth.addEventListener('change', refreshHistory);
 rankingMonth.addEventListener('change', refreshRanking);
 document.getElementById('refreshHistoryButton').addEventListener('click',refreshHistory);
 document.getElementById('refreshRankingButton').addEventListener('click',refreshRanking);
+
+bottomNav.querySelectorAll('[data-nav]').forEach(button => button.addEventListener('click', () => navigateTo(button.dataset.nav)));
+document.getElementById('resumeResultButton').addEventListener('click',resumeResultForm);
+
+const playersMonth = document.getElementById('playersMonth');
+const profileMonth = document.getElementById('profileMonth');
+let playersRequest = 0;
+let playersSeasonData = null;
+let profilePlayerName = null;
+
+async function refreshPlayers() {
+  const request = ++playersRequest;
+  const seasonId = playersMonth.value;
+  profileMonth.value = seasonId;
+  const messages = [document.getElementById('playersMessage'), document.getElementById('profileMessage')];
+  playersSeasonData = null;
+  document.getElementById('playersDirectory').replaceChildren();
+  document.getElementById('profileContent').hidden = true;
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(seasonId)) {
+    messages.forEach(message => message.textContent = 'Scegli un mese.');
+    return;
+  }
+  messages.forEach(message => message.textContent = 'Caricamento statistiche…');
+  try {
+    const matches = await loadSeasonMatches(seasonId);
+    if (request !== playersRequest) return;
+    const rows = calculateRanking(matches);
+    playersSeasonData = {seasonId, matches, rows};
+    const directory = document.getElementById('playersDirectory');
+    [...rows].sort((a,b) => a.name.localeCompare(b.name,'it')).forEach(row => {
+      const button = textElement('button', '', 'player-profile-button');
+      button.type = 'button';
+      button.setAttribute('aria-label', `Statistiche di ${row.name}`);
+      button.appendChild(textElement('span', row.name, 'player-profile-name'));
+      button.appendChild(textElement('strong', `${row.rating} pt`, 'rating-value'));
+      button.appendChild(textElement('small', `${row.games} ${row.games === 1 ? 'partita' : 'partite'} · Vittorie: ${row.wins} · Sconfitte: ${row.losses}`));
+      button.addEventListener('click', () => openPlayerProfile(row.name));
+      directory.appendChild(button);
+    });
+    if (!rows.length) directory.appendChild(textElement('p','Nessun giocatore disponibile.','empty-state'));
+    messages.forEach(message => message.textContent = '');
+    if (profilePlayerName) renderPlayerProfile();
+  } catch (error) {
+    if (request !== playersRequest) return;
+    messages.forEach(message => message.textContent = 'Impossibile caricare le statistiche. Controlla la connessione e premi Aggiorna.');
+  }
+}
+
+function openPlayerProfile(name) {
+  if (!playersSeasonData) return;
+  profilePlayerName = name;
+  profileMonth.value = playersSeasonData.seasonId;
+  renderPlayerProfile();
+  showScreen(document.getElementById('playerProfileScreen'));
+}
+
+function renderPlayerProfile() {
+  const {matches, rows} = playersSeasonData;
+  const row = rows.find(player => player.name === profilePlayerName)
+    || {name:profilePlayerName, rating:1000, games:0, wins:0, losses:0};
+  document.getElementById('profileName').textContent = row.name;
+  document.getElementById('profileRating').textContent = row.rating;
+  const change = row.rating - 1000;
+  document.getElementById('profileChange').textContent = `${change > 0 ? '+' : change < 0 ? '−' : ''}${Math.abs(change)} rispetto a inizio mese`;
+  document.getElementById('profileGames').textContent = row.games;
+  document.getElementById('profileWins').textContent = row.wins;
+  document.getElementById('profileLosses').textContent = row.losses;
+  document.getElementById('profileWinRate').textContent = row.games
+    ? `${(row.wins / row.games * 100).toLocaleString('it-IT', {maximumFractionDigits:1})}%` : '—';
+  const played = matches.filter(match => match.status === 'completed'
+    && (match.teamA.includes(row.name) || match.teamB.includes(row.name)));
+  renderMatches(document.getElementById('profileMatches'), played, 'Nessuna partita conclusa per questo giocatore nel mese scelto.');
+  document.getElementById('profileContent').hidden = false;
+}
+
+playersMonth.addEventListener('change', refreshPlayers);
+profileMonth.addEventListener('change', () => {
+  playersMonth.value = profileMonth.value;
+  refreshPlayers();
+});
+document.getElementById('refreshPlayersButton').addEventListener('click',refreshPlayers);
+document.getElementById('refreshProfileButton').addEventListener('click',refreshPlayers);
+document.getElementById('backToPlayersButton').addEventListener('click',() => navigateTo('players'));

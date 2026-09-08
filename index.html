@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Ranking Scopa</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -252,7 +252,71 @@
   <button class="secondary-button" data-go-home>TORNA ALLA HOME</button>
 </section>
 
+<section id="playersScreen" class="screen">
+  <p class="small-label">IL GRUPPO</p>
+  <h2>GIOCATORI</h2>
+  <label class="month-label" for="playersMonth">Mese delle statistiche</label>
+  <input id="playersMonth" class="month-input" type="month">
+  <p class="scoring-rule">Scegli un giocatore per vedere punti e risultati del mese.</p>
+  <button id="refreshPlayersButton" class="secondary-button">AGGIORNA</button>
+  <p id="playersMessage" class="match-message" role="status"></p>
+  <div id="playersDirectory" class="players-directory"></div>
+</section>
+
+<section id="playerProfileScreen" class="screen">
+  <p class="small-label">SCHEDA GIOCATORE</p>
+  <h2 id="profileName"></h2>
+  <label class="month-label" for="profileMonth">Mese delle statistiche</label>
+  <input id="profileMonth" class="month-input" type="month">
+  <button id="refreshProfileButton" class="secondary-button">AGGIORNA</button>
+  <p id="profileMessage" class="match-message" role="status"></p>
+  <div id="profileContent" hidden>
+    <div class="profile-rating-card">
+      <p class="small-label">PUNTI DEL MESE</p>
+      <strong id="profileRating"></strong>
+      <p id="profileChange"></p>
+    </div>
+    <dl class="profile-stat-grid">
+      <div><dt>Partite</dt><dd id="profileGames"></dd></div>
+      <div><dt>Vittorie</dt><dd id="profileWins"></dd></div>
+      <div><dt>Sconfitte</dt><dd id="profileLosses"></dd></div>
+      <div><dt>Vittorie %</dt><dd id="profileWinRate"></dd></div>
+    </dl>
+    <p class="scoring-rule">Contano solo le partite concluse in cui il giocatore era al tavolo. I risultati corretti aggiornano anche queste statistiche.</p>
+    <h3 class="profile-history-title">PARTITE DEL MESE</h3>
+    <div id="profileMatches"></div>
+  </div>
+  <button id="backToPlayersButton" class="secondary-button">← TUTTI I GIOCATORI</button>
+</section>
+
   </main>
+
+  <div id="draftResumeBar" class="draft-resume-bar" hidden>
+    <span>Risultato non salvato</span>
+    <button id="resumeResultButton" type="button">RIPRENDI</button>
+  </div>
+  <nav id="bottomNav" class="bottom-nav" aria-label="Navigazione principale" hidden>
+    <button type="button" data-nav="home">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7M5 9v12h5v-7h4v7h5V9"/></svg>
+      <span>Home</span>
+    </button>
+    <button type="button" data-nav="ranking">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21V11h6v10M9 21V4h6v17M15 21v-7h6v7M2 21h20"/></svg>
+      <span>Classifica</span>
+    </button>
+    <button type="button" data-nav="play" aria-label="Nuova partita">
+      <span class="nav-play-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>
+      <span>Nuova</span>
+    </button>
+    <button type="button" data-nav="history">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10a9 9 0 1 1 1 8M3 4v6h6M12 7v6l4 2"/></svg>
+      <span>Storico</span>
+    </button>
+    <button type="button" data-nav="players">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M2 21v-3a7 7 0 0 1 14 0v3M17 4a3 3 0 0 1 0 6M18 14a5 5 0 0 1 4 5v2"/></svg>
+      <span>Giocatori</span>
+    </button>
+  </nav>
 
 
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>

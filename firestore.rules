@@ -1,0 +1,67 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /players/{playerId} {
+      allow read: if true;
+      allow create, update: if request.auth != null;
+      allow delete: if false;
+    }
+
+    match /matches/{matchId} {
+      function validNewMatch() {
+        let data = request.resource.data;
+        return data.keys().hasOnly([
+            'seasonId', 'teamA', 'teamB', 'excluded',
+            'createdByPlayer', 'createdByUid', 'createdAt', 'status'
+          ])
+          && data.seasonId is string
+          && data.seasonId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+          && data.teamA is list && data.teamA.size() == 2
+          && data.teamA[0] is string && data.teamA[1] is string
+          && data.teamB is list && data.teamB.size() == 2
+          && data.teamB[0] is string && data.teamB[1] is string
+          && data.excluded is list
+          && data.teamA.concat(data.teamB).concat(data.excluded).toSet().size()
+              == 4 + data.excluded.size()
+          && data.createdByPlayer is string
+          && data.createdByPlayer.size() > 0
+          && data.createdByUid == request.auth.uid
+          && data.createdAt == request.time
+          && data.status == 'in_progress';
+      }
+
+      function validResult() {
+        let data = request.resource.data;
+        let gap = data.scoreA > data.scoreB
+          ? data.scoreA - data.scoreB : data.scoreB - data.scoreA;
+        return data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'scoreA', 'scoreB', 'winnerTeam', 'ratingDelta',
+            'completedAt', 'completedByUid'
+          ])
+          && data.status == 'completed'
+          && data.scoreA is int && data.scoreA >= 0
+          && data.scoreB is int && data.scoreB >= 0
+          // Precisione intera JavaScript: nessun tetto sportivo ai punti.
+          && data.scoreA <= 9007199254740991
+          && data.scoreB <= 9007199254740991
+          && data.scoreA != data.scoreB
+          && (data.scoreA >= 21 || data.scoreB >= 21)
+          && data.winnerTeam == (data.scoreA > data.scoreB ? 'A' : 'B')
+          && data.ratingDelta is int
+          && data.ratingDelta == 20 + gap
+          && data.ratingDelta <= 9007199254740991
+          && data.completedByUid == request.auth.uid
+          && data.completedAt == request.time;
+      }
+
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && validNewMatch();
+      allow update: if request.auth != null
+        && resource.data.createdByUid == request.auth.uid
+        && resource.data.status == 'in_progress'
+        && validResult();
+      allow delete: if false;
+    }
+  }
+}

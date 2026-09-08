@@ -33,13 +33,70 @@
 
 <section id="homeScreen" class="screen">
 
-  <p class="small-label">BENVENUTO</p>
+  <div class="home-header">
+    <div>
+      <p class="small-label">BENVENUTO</p>
+      <h2 id="welcomePlayerName">GIOCATORE</h2>
+    </div>
 
-  <h2 id="welcomePlayerName">
-    GIOCATORE
-  </h2>
+    <div id="homeSeason" class="season-badge">
+      SETTEMBRE 2026
+    </div>
+  </div>
 
-  <button id="newMatchButton" class="primary-button">
+
+  <div class="home-card ranking-preview">
+
+    <p class="card-label">CLASSIFICA DEL MESE</p>
+
+    <div id="homePodium" class="podium-preview">
+      <div>
+        🥇
+        <strong>---</strong>
+      </div>
+
+      <div>
+        🥈
+        <strong>---</strong>
+      </div>
+
+      <div>
+        🥉
+        <strong>---</strong>
+      </div>
+    </div>
+
+    <button id="rankingButton" class="secondary-button">
+      VEDI CLASSIFICA
+    </button>
+
+  </div>
+
+
+  <div class="home-card">
+
+    <p class="card-label">ULTIME PARTITE</p>
+
+    <div id="recentMatchesPreview" class="recent-matches-preview">
+      <p class="empty-state">
+        Nessuna partita registrata.
+      </p>
+    </div>
+
+    <button id="historyButton" class="secondary-button">
+      VEDI STORICO
+    </button>
+
+  </div>
+
+
+  <div class="home-card">
+    <p class="card-label">PARTITE IN CORSO</p>
+    <div id="openMatches"></div>
+  </div>
+  <p id="homeDataMessage" class="match-message" role="status"></p>
+  <button id="refreshHomeButton" class="secondary-button">AGGIORNA</button>
+  <button id="newMatchButton" class="primary-button big-play-button">
     ♠ NUOVA PARTITA
   </button>
 
@@ -116,10 +173,80 @@
     ♠ INIZIA PARTITA
   </button>
 
+  <p id="matchSaveMessage" class="match-message" role="status" aria-live="polite"></p>
+
   <button id="cancelDrawButton" class="text-button">
     ANNULLA
   </button>
 
+</section>
+
+<section id="matchInProgressScreen" class="screen">
+  <p id="activeMatchSeason" class="small-label"></p>
+  <h2 id="activeMatchTitle">PARTITA IN CORSO</h2>
+  <p id="activeMatchScore" class="final-score"></p>
+  <div class="team-card">
+    <span class="team-symbol">♠</span>
+    <p class="team-label">TEAM BLACK</p>
+    <h3 id="activeTeamAPlayers"></h3>
+  </div>
+  <div class="versus">VS</div>
+  <div class="team-card red-team">
+    <span class="team-symbol">♥</span>
+    <p class="team-label">TEAM RED</p>
+    <h3 id="activeTeamBPlayers"></h3>
+  </div>
+  <div class="excluded-box">
+    <p class="small-label">FUORI DAL TAVOLO</p>
+    <p id="activeExcludedPlayers"></p>
+  </div>
+  <button id="enterResultButton" class="primary-button match-action">INSERISCI RISULTATO</button>
+  <p id="resultMessage" class="match-message" role="status" aria-live="polite"></p>
+  <button class="secondary-button" data-go-home>TORNA ALLA HOME</button>
+</section>
+
+<section id="resultScreen" class="screen">
+  <p class="small-label">PARTITA AI 21</p>
+  <h2>INSERISCI RISULTATO</h2>
+  <p class="selection-info">Inserisci i punti finali, anche superiori a 21. Il risultato confermato è definitivo.</p>
+  <form id="resultForm" novalidate>
+    <div class="team-card score-card">
+      <label for="scoreA">♠ TEAM BLACK</label>
+      <p id="scoreTeamA"></p>
+      <input id="scoreA" name="scoreA" type="number" min="0" step="1" inputmode="numeric" required aria-describedby="scoreTeamA">
+    </div>
+    <div class="team-card red-team score-card">
+      <label for="scoreB">♥ TEAM RED</label>
+      <p id="scoreTeamB"></p>
+      <input id="scoreB" name="scoreB" type="number" min="0" step="1" inputmode="numeric" required aria-describedby="scoreTeamB">
+    </div>
+    <p class="scoring-rule">20 punti + scarto del risultato, senza limite.</p>
+    <p id="resultPreview" class="match-message" role="status" aria-live="polite"></p>
+    <button id="confirmResultButton" class="primary-button match-action" type="submit" disabled>CONFERMA RISULTATO</button>
+    <button id="cancelResultButton" class="secondary-button" type="button">← TORNA ALLA PARTITA</button>
+    <p id="resultSaveMessage" class="match-message" role="status" aria-live="polite"></p>
+  </form>
+</section>
+
+<section id="historyScreen" class="screen">
+  <h2>STORICO PARTITE</h2>
+  <label class="month-label" for="historyMonth">Mese della partita</label>
+  <input id="historyMonth" class="month-input" type="month">
+  <button id="refreshHistoryButton" class="secondary-button">AGGIORNA</button>
+  <p id="historyMessage" class="match-message" role="status"></p>
+  <div id="historyList"></div>
+  <button class="secondary-button" data-go-home>TORNA ALLA HOME</button>
+</section>
+
+<section id="rankingScreen" class="screen">
+  <h2>CLASSIFICA</h2>
+  <label class="month-label" for="rankingMonth">Mese della classifica</label>
+  <input id="rankingMonth" class="month-input" type="month">
+  <p class="scoring-rule">Si parte da 1000 punti ogni mese. Ogni giocatore vince o perde 20 + scarto. A pari punti, stessa posizione.</p>
+  <button id="refreshRankingButton" class="secondary-button">AGGIORNA</button>
+  <p id="rankingMessage" class="match-message" role="status"></p>
+  <div id="rankingList"></div>
+  <button class="secondary-button" data-go-home>TORNA ALLA HOME</button>
 </section>
 
   </main>

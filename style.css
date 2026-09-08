@@ -235,3 +235,122 @@ h2 {
   border-bottom: 1px solid #28231d;
   color: #a49c8f;
 }
+.home-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 15px;
+  margin-bottom: 25px;
+  text-align: left;
+}
+
+.home-header h2 {
+  margin-bottom: 0;
+}
+
+.season-badge {
+  padding: 8px 10px;
+  border: 1px solid #5a4c34;
+  border-radius: 10px;
+  color: #d5af45;
+  font-size: 10px;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.home-card {
+  margin-bottom: 18px;
+  padding: 20px;
+  border-radius: 18px;
+
+  border: 1px solid #312a20;
+
+  background:
+    linear-gradient(
+      145deg,
+      #171717,
+      #0d0d0d
+    );
+
+  text-align: left;
+}
+
+.card-label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #8b8376;
+  margin-bottom: 18px;
+}
+
+.podium-preview {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  text-align: center;
+  margin-bottom: 15px;
+}
+
+.podium-preview div {
+  padding: 13px 5px;
+  border-radius: 12px;
+  background: #101010;
+  border: 1px solid #27231d;
+}
+
+.podium-preview strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 13px;
+  color: #f3d57a;
+}
+
+.recent-matches-preview {
+  min-height: 55px;
+}
+
+.empty-state {
+  color: #777066;
+  font-size: 13px;
+}
+
+.big-play-button {
+  margin-top: 18px;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+  transform: none;
+}
+
+.match-message {
+  margin-top: 16px;
+  color: #d7c8ab;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.match-message:empty {
+  display: none;
+}
+
+[hidden] { display: none !important; }
+
+.final-score { font-size: 36px; font-weight: 800; color: #f3d57a; margin-bottom: 22px; }
+.final-score:empty { display: none; }
+.score-card label { display: block; color: #f3d57a; font-weight: 700; }
+.score-card p { margin: 12px 0; line-height: 1.5; }
+.score-card input { width: 100%; max-width: 170px; padding: 12px; font-size: 32px; text-align: center; }
+.score-card input, .month-input {
+  background: #111; color: #f5f0e6; border: 1px solid #857045; border-radius: 10px; color-scheme: dark;
+}
+.month-input { width: 100%; min-width: 0; padding: 12px; font: inherit; margin-bottom: 12px; }
+.month-label { display: block; text-align: left; margin-bottom: 8px; color: #c3b59c; }
+.scoring-rule { font-size: 13px; color: #c3b59c; line-height: 1.6; margin-top: 14px; }
+.match-summary { border-bottom: 1px solid #403526; padding: 18px 0; text-align: left; line-height: 1.5; }
+.match-summary strong { display: block; color: #f3d57a; margin-top: 8px; }
+.ranking-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 18px 0; text-align: left; border-bottom: 1px solid #403526; }
+.ranking-row small { grid-column: 1 / -1; color: #c3b59c; }
+.rating-value { color: #f3d57a; }
+.team-card h3, .match-summary p, .ranking-row strong { overflow-wrap: anywhere; }
+button:focus-visible, input:focus-visible { outline: 2px solid #f3d57a; outline-offset: 3px; }

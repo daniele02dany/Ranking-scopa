@@ -55,6 +55,14 @@ const playerScreen = document.getElementById("playerScreen");
 const homeScreen = document.getElementById("homeScreen");
 const newMatchScreen =
   document.getElementById("newMatchScreen");
+  const rankingButton =
+  document.getElementById("rankingButton");
+
+const historyButton =
+  document.getElementById("historyButton");
+
+const recentMatchesPreview =
+  document.getElementById("recentMatchesPreview");
 
 const drawResultScreen =
   document.getElementById("drawResultScreen");
@@ -90,16 +98,20 @@ const excludedPlayers =
 const enterButton = document.getElementById("enterButton");
 const playerList = document.getElementById("playerList");
 const welcomePlayerName = document.getElementById("welcomePlayerName");
+const matchInProgressScreen = document.getElementById("matchInProgressScreen");
+const matchSaveMessage = document.getElementById("matchSaveMessage");
+const activeTeamAPlayers = document.getElementById("activeTeamAPlayers");
+const activeTeamBPlayers = document.getElementById("activeTeamBPlayers");
+const activeExcludedPlayers = document.getElementById("activeExcludedPlayers");
+const activeMatchSeason = document.getElementById("activeMatchSeason");
+const enterResultButton = document.getElementById("enterResultButton");
+const resultMessage = document.getElementById("resultMessage");
+let isCreatingMatch = false;
+let currentMatch = null;
 
 
 function showScreen(screen) {
-
-  welcomeScreen.classList.remove("active");
-  playerScreen.classList.remove("active");
-  homeScreen.classList.remove("active");
-  newMatchScreen.classList.remove("active");
-  drawResultScreen.classList.remove("active");
-
+  document.querySelectorAll('.screen').forEach(item => item.classList.remove('active'));
   screen.classList.add("active");
 }
 
@@ -189,6 +201,8 @@ auth.onAuthStateChanged(async (user) => {
   console.log("Utente Firebase:", user.uid);  
   
   await initializePlayers();
+  await createPlayerButtons();
+  await refreshHome();
 
   const savedPlayer =
     localStorage.getItem("rankingScopaPlayer");
@@ -345,6 +359,12 @@ function generateDraw(selectedPlayers) {
     attempts < 50
   );
 
+  // Garantisce un sorteggio diverso anche dopo 50 tentativi uguali.
+  if (isSameDraw(draw, previousDraw)) {
+    [draw.teamA[1], draw.teamB[0]] =
+      [draw.teamB[0], draw.teamA[1]];
+  }
+
   return draw;
 }
 drawButton.addEventListener(
@@ -377,6 +397,7 @@ drawButton.addEventListener(
   }
 );
 function showDraw(draw) {
+  matchSaveMessage.textContent = "";
 
   teamAPlayers.textContent =
     draw.teamA.join(" + ");
@@ -403,7 +424,7 @@ redrawButton.addEventListener(
   "click",
   () => {
 
-    if (!currentDraw) {
+    if (!currentDraw || isCreatingMatch) {
       return;
     }
 
@@ -425,6 +446,7 @@ redrawButton.addEventListener(
 cancelDrawButton.addEventListener(
   "click",
   () => {
+    if (isCreatingMatch) return;
 
     currentDraw = null;
 
@@ -432,21 +454,337 @@ cancelDrawButton.addEventListener(
 
   }
 );
-startMatchButton.addEventListener(
-  "click",
-  () => {
+function getSeasonId(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
 
-    if (!currentDraw) {
-      return;
-    }
-
-    previousDraw = currentDraw;
-
-    alert(
-      "Sorteggio confermato! Nel prossimo passaggio creeremo la partita vera."
-    );
-
+async function startMatch() {
+  if (isCreatingMatch || !currentDraw) return;
+  matchSaveMessage.textContent = "";
+  const user = auth.currentUser;
+  const playerName = localStorage.getItem("rankingScopaPlayer");
+  if (!user || !availablePlayers.some(player => player.name === playerName)) {
+    matchSaveMessage.textContent = "Accedi e scegli un giocatore prima di iniziare la partita.";
+    return;
   }
-);
+  const { teamA, teamB, excluded } = currentDraw;
+  const participants = [...teamA, ...teamB, ...excluded];
+  if (teamA.length !== 2 || teamB.length !== 2 ||
+      new Set(participants).size !== participants.length ||
+      !participants.every(name => availablePlayers.some(player => player.name === name))) {
+    matchSaveMessage.textContent = "Sorteggio non valido. Seleziona i giocatori e sorteggia di nuovo.";
+    return;
+  }
 
-createPlayerButtons();
+  isCreatingMatch = true;
+  [startMatchButton, redrawButton, cancelDrawButton].forEach(button => button.disabled = true);
+  startMatchButton.textContent = "SALVATAGGIO…";
+  matchSaveMessage.textContent = "Salvataggio in corso. Attendi la conferma e mantieni la connessione attiva.";
+  const match = {
+    seasonId: getSeasonId(),
+    teamA: [...teamA],
+    teamB: [...teamB],
+    excluded: [...excluded],
+    createdByPlayer: playerName,
+    createdByUid: user.uid,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    status: "in_progress"
+  };
+
+  try {
+    const reference = await db.collection("matches").add(match);
+    currentMatch = { ...match, id: reference.id };
+    previousDraw = currentDraw;
+    currentDraw = null;
+    openMatch(currentMatch);
+  } catch (error) {
+    console.error("Errore creazione partita:", error);
+    matchSaveMessage.textContent = error.code === "permission-denied"
+      ? "Firestore non autorizza la creazione della partita. Controlla le regole della collection matches, poi riprova."
+      : "Partita non salvata. Controlla la connessione e riprova: il sorteggio è rimasto invariato.";
+  } finally {
+    isCreatingMatch = false;
+    [startMatchButton, redrawButton, cancelDrawButton].forEach(button => button.disabled = false);
+    startMatchButton.textContent = "♠ INIZIA PARTITA";
+  }
+}
+
+startMatchButton.addEventListener("click", startMatch);
+enterResultButton.addEventListener("click", () => {
+  if (!currentMatch || currentMatch.status !== 'in_progress') return;
+  resultForm.reset();
+  document.getElementById('scoreTeamA').textContent = currentMatch.teamA.join(' + ');
+  document.getElementById('scoreTeamB').textContent = currentMatch.teamB.join(' + ');
+  resultSaveMessage.textContent = '';
+  updateResultPreview();
+  showScreen(resultScreen);
+  scoreAInput.focus();
+});
+const resultScreen = document.getElementById('resultScreen');
+const resultForm = document.getElementById('resultForm');
+const scoreAInput = document.getElementById('scoreA');
+const scoreBInput = document.getElementById('scoreB');
+const resultPreview = document.getElementById('resultPreview');
+const resultSaveMessage = document.getElementById('resultSaveMessage');
+const confirmResultButton = document.getElementById('confirmResultButton');
+const cancelResultButton = document.getElementById('cancelResultButton');
+const historyMonth = document.getElementById('historyMonth');
+const rankingMonth = document.getElementById('rankingMonth');
+let isClosingMatch = false;
+let homeRequest = 0;
+let historyRequest = 0;
+let rankingRequest = 0;
+
+function calculateResult(scoreA, scoreB) {
+  if (!Number.isSafeInteger(scoreA) || !Number.isSafeInteger(scoreB) || scoreA < 0 || scoreB < 0) {
+    throw new Error('Inserisci due punteggi interi, uguali o superiori a zero.');
+  }
+  if (scoreA === scoreB) throw new Error('Il risultato è in parità: continuate a giocare.');
+  if (Math.max(scoreA, scoreB) < 21) throw new Error('Per concludere, una squadra deve raggiungere almeno 21 punti.');
+  const ratingDelta = 20 + Math.abs(scoreA - scoreB);
+  if (!Number.isSafeInteger(ratingDelta)) throw new Error('Il punteggio è troppo grande per essere rappresentato con precisione.');
+  return { scoreA, scoreB, winnerTeam: scoreA > scoreB ? 'A' : 'B', ratingDelta };
+}
+
+function readResult() {
+  if (!scoreAInput.value.trim() || !scoreBInput.value.trim()) throw new Error('Inserisci il punteggio di entrambe le squadre.');
+  return calculateResult(Number(scoreAInput.value), Number(scoreBInput.value));
+}
+
+function resultDescription(match) {
+  const winners = match.winnerTeam === 'A' ? match.teamA : match.teamB;
+  const losers = match.winnerTeam === 'A' ? match.teamB : match.teamA;
+  return `${winners.join(' + ')}: +${match.ratingDelta} punti ciascuno. ${losers.join(' + ')}: −${match.ratingDelta} punti ciascuno. Esclusi invariati.`;
+}
+
+function updateResultPreview() {
+  try {
+    const result = readResult();
+    resultPreview.textContent = resultDescription({ ...currentMatch, ...result });
+    confirmResultButton.disabled = isClosingMatch;
+  } catch (error) {
+    resultPreview.textContent = error.message;
+    confirmResultButton.disabled = true;
+  }
+}
+
+function openMatch(match) {
+  currentMatch = match;
+  activeTeamAPlayers.textContent = match.teamA.join(' + ');
+  activeTeamBPlayers.textContent = match.teamB.join(' + ');
+  activeExcludedPlayers.textContent = match.excluded.join(', ') || 'Nessuno';
+  activeMatchSeason.textContent = `STAGIONE ${match.seasonId}`;
+  const completed = match.status === 'completed';
+  document.getElementById('activeMatchTitle').textContent = completed ? 'PARTITA CONCLUSA' : 'PARTITA IN CORSO';
+  document.getElementById('activeMatchScore').textContent = completed ? `${match.scoreA} – ${match.scoreB}` : '';
+  enterResultButton.hidden = completed || match.createdByUid !== auth.currentUser?.uid;
+  resultMessage.textContent = completed ? resultDescription(match) :
+    match.createdByUid !== auth.currentUser?.uid ? 'Il risultato va inserito dal dispositivo che ha creato la partita.' : '';
+  showScreen(matchInProgressScreen);
+}
+
+async function closeMatch(event) {
+  event.preventDefault();
+  if (isClosingMatch || !currentMatch) return;
+  let result;
+  try { result = readResult(); } catch (error) { resultSaveMessage.textContent = error.message; return; }
+  const user = auth.currentUser;
+  if (!user || currentMatch.createdByUid !== user.uid) {
+    resultSaveMessage.textContent = 'Usa il dispositivo che ha creato la partita per salvare il risultato.';
+    return;
+  }
+  const matchId = currentMatch.id;
+  isClosingMatch = true;
+  [confirmResultButton, cancelResultButton, scoreAInput, scoreBInput].forEach(element => element.disabled = true);
+  resultSaveMessage.textContent = 'Salvataggio del risultato…';
+  try {
+    const reference = db.collection('matches').doc(matchId);
+    const saved = await db.runTransaction(async transaction => {
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists) throw new Error('La partita non esiste più.');
+      const match = snapshot.data();
+      // La lettura nella transazione impedisce due chiusure anche da schede diverse.
+      if (match.status === 'completed') return { ...match, id: matchId };
+      if (match.status !== 'in_progress' || match.createdByUid !== user.uid) throw new Error('Non puoi concludere questa partita.');
+      const update = {
+        ...result,
+        status: 'completed',
+        completedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        completedByUid: user.uid
+      };
+      transaction.update(reference, update);
+      return { ...match, ...update, id: matchId };
+    });
+    openMatch(saved);
+  } catch (error) {
+    console.error('Errore salvataggio risultato:', error);
+    resultSaveMessage.textContent = error.code === 'permission-denied'
+      ? 'Pubblica le nuove regole Firestore per autorizzare la chiusura, poi riprova. I punteggi inseriti sono ancora qui.'
+      : `Risultato non salvato. ${error.code ? 'Controlla la connessione e riprova.' : error.message}`;
+  } finally {
+    isClosingMatch = false;
+    [cancelResultButton, scoreAInput, scoreBInput].forEach(element => element.disabled = false);
+    updateResultPreview();
+  }
+}
+
+function snapshotMatches(snapshot) {
+  const matches = [];
+  snapshot.forEach(doc => matches.push({ ...doc.data(), id: doc.id }));
+  return matches.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0) || a.id.localeCompare(b.id));
+}
+
+async function loadSeasonMatches(seasonId) {
+  return snapshotMatches(await db.collection('matches').where('seasonId', '==', seasonId).get());
+}
+
+function textElement(tag, text, className) {
+  const element = document.createElement(tag);
+  element.textContent = text;
+  if (className) element.className = className;
+  return element;
+}
+
+function renderMatches(container, matches, emptyText) {
+  container.replaceChildren();
+  if (!matches.length) container.appendChild(textElement('p', emptyText, 'empty-state'));
+  matches.forEach(match => {
+    const card = textElement('article', '', 'match-summary');
+    const date = match.createdAt?.toDate?.();
+    card.appendChild(textElement('p', date ? date.toLocaleString('it-IT', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : match.seasonId, 'small-label'));
+    card.appendChild(textElement('p', `${match.teamA.join(' + ')} / ${match.teamB.join(' + ')}`));
+    card.appendChild(textElement('strong', match.status === 'completed' ? `${match.scoreA} – ${match.scoreB} · ±${match.ratingDelta} punti` : 'In corso'));
+    const button = textElement('button', match.status === 'completed' ? 'VEDI RISULTATO' : 'APRI PARTITA', 'secondary-button');
+    button.type = 'button';
+    button.addEventListener('click', () => openMatch(match));
+    card.appendChild(button);
+    container.appendChild(card);
+  });
+}
+
+// Il registro delle partite è la fonte dei punti mensili: niente incrementi duplicabili
+// o contatori players da sincronizzare. Ogni matchId contribuisce una sola volta.
+function calculateRanking(matches, roster = availablePlayers) {
+  const rows = new Map(roster.map(player => [player.name, { name: player.name, rating: 1000, games: 0, wins: 0, losses: 0 }]));
+  const seen = new Set();
+  matches.forEach(match => {
+    if (match.status !== 'completed' || seen.has(match.id)) return;
+    seen.add(match.id);
+    const result = calculateResult(match.scoreA, match.scoreB);
+    [['A', match.teamA], ['B', match.teamB]].forEach(([team, names]) => names.forEach(name => {
+      if (!rows.has(name)) rows.set(name, {name, rating:1000, games:0, wins:0, losses:0});
+      const row = rows.get(name);
+      const won = team === result.winnerTeam;
+      row.rating += won ? result.ratingDelta : -result.ratingDelta;
+      row.games++;
+      row.wins += Number(won);
+      row.losses += Number(!won);
+    }));
+  });
+  return [...rows.values()].sort((a,b) => b.rating - a.rating || a.name.localeCompare(b.name, 'it'));
+}
+
+function renderRanking(container, rows) {
+  container.replaceChildren();
+  let previousRating;
+  let position = 0;
+  rows.forEach((row, index) => {
+    if (row.rating !== previousRating) position = index + 1;
+    previousRating = row.rating;
+    const entry = textElement('article', '', 'ranking-row');
+    entry.appendChild(textElement('strong', `${position}. ${row.name}`));
+    entry.appendChild(textElement('strong', `${row.rating} pt`, 'rating-value'));
+    entry.appendChild(textElement('small', `${row.games} ${row.games === 1 ? 'partita' : 'partite'} · Vittorie: ${row.wins} · Sconfitte: ${row.losses}`));
+    container.appendChild(entry);
+  });
+}
+
+async function refreshHome() {
+  const request = ++homeRequest;
+  const message = document.getElementById('homeDataMessage');
+  const month = getSeasonId();
+  document.getElementById('homeSeason').textContent = new Date().toLocaleDateString('it-IT', {month:'long',year:'numeric'}).toUpperCase();
+  message.textContent = 'Aggiornamento partite e classifica…';
+  try {
+    const [matches, openSnapshot] = await Promise.all([
+      loadSeasonMatches(month), db.collection('matches').where('status','==','in_progress').get()
+    ]);
+    if (request !== homeRequest) return;
+    renderMatches(document.getElementById('openMatches'), snapshotMatches(openSnapshot), 'Nessuna partita in corso.');
+    renderMatches(recentMatchesPreview, matches.filter(match => match.status === 'completed').slice(0,3), 'Nessuna partita conclusa questo mese.');
+    const podium = document.getElementById('homePodium');
+    podium.replaceChildren();
+    const ranked = calculateRanking(matches).filter(row => row.games > 0);
+    let rank = 0;
+    ranked.slice(0,3).forEach((row,index) => {
+      if (index === 0 || row.rating !== ranked[index - 1].rating) rank = index + 1;
+      const item = textElement('div', `${rank}°`);
+      item.appendChild(textElement('strong', row.name));
+      item.appendChild(textElement('small', `${row.rating} pt`));
+      podium.appendChild(item);
+    });
+    if (!ranked.length) podium.appendChild(textElement('p','La classifica inizierà con la prima partita conclusa.','empty-state'));
+    message.textContent = '';
+  } catch (error) {
+    if (request !== homeRequest) return;
+    console.error('Errore caricamento Home:',error);
+    message.textContent = 'Non è stato possibile aggiornare i dati. Controlla la connessione e premi Aggiorna.';
+  }
+}
+
+async function refreshHistory() {
+  const request = ++historyRequest;
+  const month = historyMonth.value;
+  const message = document.getElementById('historyMessage');
+  document.getElementById('historyList').replaceChildren();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) { message.textContent = 'Scegli un mese.'; return; }
+  message.textContent = 'Caricamento…';
+  try {
+    const matches = await loadSeasonMatches(month);
+    if (request !== historyRequest) return;
+    renderMatches(document.getElementById('historyList'), matches, 'Nessuna partita in questo mese.');
+    message.textContent = '';
+  } catch (error) {
+    if (request === historyRequest) message.textContent = 'Impossibile caricare lo storico. Controlla la connessione e riprova.';
+  }
+}
+
+async function refreshRanking() {
+  const request = ++rankingRequest;
+  const month = rankingMonth.value;
+  const message = document.getElementById('rankingMessage');
+  document.getElementById('rankingList').replaceChildren();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) { message.textContent = 'Scegli un mese.'; return; }
+  message.textContent = 'Caricamento…';
+  try {
+    const matches = await loadSeasonMatches(month);
+    if (request !== rankingRequest) return;
+    renderRanking(document.getElementById('rankingList'), calculateRanking(matches));
+    message.textContent = '';
+  } catch (error) {
+    if (request === rankingRequest) message.textContent = 'Impossibile caricare la classifica. Controlla la connessione e riprova.';
+  }
+}
+
+resultForm.addEventListener('submit', closeMatch);
+[scoreAInput,scoreBInput].forEach(input => input.addEventListener('input',updateResultPreview));
+cancelResultButton.addEventListener('click', () => { if (!isClosingMatch) openMatch(currentMatch); });
+document.querySelectorAll('[data-go-home]').forEach(button => button.addEventListener('click', () => {
+  showScreen(homeScreen);
+  refreshHome();
+}));
+document.getElementById('refreshHomeButton').addEventListener('click',refreshHome);
+rankingButton.addEventListener('click', () => {
+  rankingMonth.value = getSeasonId();
+  showScreen(document.getElementById('rankingScreen'));
+  refreshRanking();
+});
+historyButton.addEventListener('click', () => {
+  historyMonth.value = getSeasonId();
+  showScreen(document.getElementById('historyScreen'));
+  refreshHistory();
+});
+historyMonth.addEventListener('change', refreshHistory);
+rankingMonth.addEventListener('change', refreshRanking);
+document.getElementById('refreshHistoryButton').addEventListener('click',refreshHistory);
+document.getElementById('refreshRankingButton').addEventListener('click',refreshRanking);

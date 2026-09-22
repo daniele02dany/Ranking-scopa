@@ -209,9 +209,9 @@
 </section>
 
 <section id="resultScreen" class="screen">
-  <p class="small-label">PARTITA AI 21</p>
+  <p class="small-label">INSERISCI RISULTATO</p>
   <h2 id="resultFormTitle">INSERISCI RISULTATO</h2>
-  <p id="resultFormHelp" class="selection-info">Inserisci i punti finali, anche superiori a 21. Controlla squadre e punteggi prima di confermare.</p>
+  <p id="resultFormHelp" class="selection-info">Inserisci due punteggi interi non negativi, senza pareggio. Controlla squadre e punteggi prima di confermare.</p>
   <form id="resultForm" novalidate>
     <div class="team-card score-card">
       <label for="scoreA">♠ TEAM BLACK</label>
@@ -223,7 +223,7 @@
       <p id="scoreTeamB"></p>
       <input id="scoreB" name="scoreB" type="number" min="0" step="1" inputmode="numeric" required aria-describedby="scoreTeamB">
     </div>
-    <p class="scoring-rule">20 punti + scarto del risultato, senza limite.</p>
+    <p class="scoring-rule">Elo mensile · K 32. Più ampio è lo scarto, maggiore è la variazione Elo.</p>
     <p id="resultPreview" class="match-message" role="status" aria-live="polite"></p>
     <button id="confirmResultButton" class="primary-button match-action" type="submit" disabled>CONFERMA RISULTATO</button>
     <button id="cancelResultButton" class="secondary-button" type="button">← TORNA ALLA PARTITA</button>
@@ -245,7 +245,7 @@
   <h2>CLASSIFICA</h2>
   <label class="month-label" for="rankingMonth">Mese della classifica</label>
   <input id="rankingMonth" class="month-input" type="month">
-  <p class="scoring-rule">Si parte da 1000 punti ogni mese. Ogni giocatore vince o perde 20 + scarto. A pari punti, stessa posizione.</p>
+  <p class="scoring-rule">Si parte da 1000 Elo ogni mese · K 32. Il rating di squadra è la media dei due giocatori. Più ampio è lo scarto, maggiore è la variazione Elo. A pari Elo, stessa posizione.</p>
   <button id="refreshRankingButton" class="secondary-button">AGGIORNA</button>
   <p id="rankingMessage" class="match-message" role="status"></p>
   <div id="rankingList"></div>
@@ -257,7 +257,7 @@
   <h2>GIOCATORI</h2>
   <label class="month-label" for="playersMonth">Mese delle statistiche</label>
   <input id="playersMonth" class="month-input" type="month">
-  <p class="scoring-rule">Scegli un giocatore per vedere punti e risultati del mese.</p>
+  <p class="scoring-rule">Scegli un giocatore per vedere Elo e risultati del mese.</p>
   <button id="refreshPlayersButton" class="secondary-button">AGGIORNA</button>
   <p id="playersMessage" class="match-message" role="status"></p>
   <div id="playersDirectory" class="players-directory"></div>
@@ -272,7 +272,7 @@
   <p id="profileMessage" class="match-message" role="status"></p>
   <div id="profileContent" hidden>
     <div class="profile-rating-card">
-      <p class="small-label">PUNTI DEL MESE</p>
+      <p class="small-label">ELO DEL MESE</p>
       <strong id="profileRating"></strong>
       <p id="profileChange"></p>
     </div>

@@ -27,12 +27,6 @@ async function initializePlayers() {
 
       await db.collection("players").add({
         name: playerName,
-        rating: 1000,
-        wins: 0,
-        losses: 0,
-        games: 0,
-        streak: 0,
-        bestRating: 1000,
         active: true,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
@@ -603,8 +597,8 @@ function openResultForm(mode) {
   }
   document.getElementById('resultFormTitle').textContent = correcting ? 'CORREGGI RISULTATO' : 'INSERISCI RISULTATO';
   document.getElementById('resultFormHelp').textContent = correcting
-    ? `Risultato registrato: ${currentMatch.scoreA} – ${currentMatch.scoreB}. La correzione sostituisce questo risultato e aggiorna i punti della stessa partita.`
-    : 'Inserisci i punti finali, anche superiori a 21. Controlla squadre e punteggi prima di confermare.';
+    ? `Risultato registrato: ${currentMatch.scoreA} – ${currentMatch.scoreB}. La correzione ricalcola l’Elo di questa partita e di tutte le successive del mese.`
+    : 'Inserisci due punteggi interi non negativi, senza pareggio. Controlla squadre e punteggi prima di confermare.';
   confirmResultButton.textContent = correcting ? 'CONFERMA CORREZIONE' : 'CONFERMA RISULTATO';
   document.getElementById('scoreTeamA').textContent = currentMatch.teamA.join(' + ');
   document.getElementById('scoreTeamB').textContent = currentMatch.teamB.join(' + ');
@@ -637,10 +631,7 @@ function calculateResult(scoreA, scoreB) {
     throw new Error('Inserisci due punteggi interi, uguali o superiori a zero.');
   }
   if (scoreA === scoreB) throw new Error('Il risultato è in parità: continuate a giocare.');
-  if (Math.max(scoreA, scoreB) < 21) throw new Error('Per concludere, una squadra deve raggiungere almeno 21 punti.');
-  const ratingDelta = 20 + Math.abs(scoreA - scoreB);
-  if (!Number.isSafeInteger(ratingDelta)) throw new Error('Il punteggio è troppo grande per essere rappresentato con precisione.');
-  return { scoreA, scoreB, winnerTeam: scoreA > scoreB ? 'A' : 'B', ratingDelta };
+  return { scoreA, scoreB, winnerTeam: scoreA > scoreB ? 'A' : 'B' };
 }
 
 function readResult() {
@@ -649,26 +640,24 @@ function readResult() {
 }
 
 function resultDescription(match) {
-  const winners = match.winnerTeam === 'A' ? match.teamA : match.teamB;
-  const losers = match.winnerTeam === 'A' ? match.teamB : match.teamA;
-  return `${winners.join(' + ')}: +${match.ratingDelta} punti ciascuno. ${losers.join(' + ')}: −${match.ratingDelta} punti ciascuno. Esclusi invariati.`;
+  if (!match.elo) return 'Elo non disponibile: aggiorna la partita per ricalcolarlo dal mese completo.';
+  const signed = value => value > 0 ? '+' + value : String(value);
+  return [...match.teamA.map(name => name + ' ' + signed(match.elo.deltaA)),
+    ...match.teamB.map(name => name + ' ' + signed(match.elo.deltaB))].join(' · ') + ' Elo. Esclusi invariati.';
 }
 
 function updateResultPreview() {
   try {
     const result = readResult();
-    resultPreview.textContent = resultDescription({ ...currentMatch, ...result });
+    const winners = result.winnerTeam === 'A' ? currentMatch.teamA : currentMatch.teamB;
+    resultPreview.textContent = `Vince ${winners.join(' + ')}. Elo mensile · K 32: la variazione sarà ricalcolata dal registro completo dopo il salvataggio.`;
     if (resultMode === 'correction' && correctionBasis) {
       if (result.scoreA === correctionBasis.scoreA && result.scoreB === correctionBasis.scoreB) {
         resultPreview.textContent = 'Il risultato è invariato. Modifica almeno uno dei due punteggi per correggerlo.';
         confirmResultButton.disabled = true;
         return;
       }
-      const before = calculateResult(correctionBasis.scoreA, correctionBasis.scoreB);
-      const changeA = (result.winnerTeam === 'A' ? result.ratingDelta : -result.ratingDelta)
-        - (before.winnerTeam === 'A' ? before.ratingDelta : -before.ratingDelta);
-      const signed = points => points > 0 ? `+${points}` : points < 0 ? `−${Math.abs(points)}` : '0';
-      resultPreview.textContent += ` Rispetto alla classifica attuale: ${currentMatch.teamA.join(' + ')} ${signed(changeA)} punti ciascuno; ${currentMatch.teamB.join(' + ')} ${signed(-changeA)} punti ciascuno.`;
+      resultPreview.textContent += ' La correzione ricalcola anche tutte le partite successive del mese.';
     }
     confirmResultButton.disabled = isClosingMatch;
   } catch (error) {
@@ -677,7 +666,9 @@ function updateResultPreview() {
   }
 }
 
+let matchDetailRequest = 0;
 function openMatch(match) {
+  const request = ++matchDetailRequest;
   currentMatch = match;
   activeTeamAPlayers.textContent = match.teamA.join(' + ');
   activeTeamBPlayers.textContent = match.teamB.join(' + ');
@@ -695,6 +686,19 @@ function openMatch(match) {
   resultMessage.textContent = completed ? resultDescription(match) :
     match.createdByUid !== auth.currentUser?.uid ? 'Il risultato va inserito dal dispositivo che ha creato la partita.' : '';
   showScreen(matchInProgressScreen);
+  if (completed) {
+    resultMessage.textContent = 'Ricalcolo Elo del mese…';
+    loadSeasonMatches(match.seasonId).then(matches => {
+      if (request !== matchDetailRequest || currentMatch?.id !== match.id) return;
+      const latest = matches.find(item => item.id === match.id);
+      if (!latest) throw new Error('Partita non trovata');
+      currentMatch = latest;
+      resultMessage.textContent = resultDescription(latest);
+      document.getElementById('activeMatchScore').textContent = latest.scoreA + ' – ' + latest.scoreB;
+    }).catch(() => {
+      if (request === matchDetailRequest) resultMessage.textContent = 'Impossibile ricalcolare l’Elo. Riapri la partita quando la connessione è disponibile.';
+    });
+  }
 }
 
 async function closeMatch(event) {
@@ -743,8 +747,7 @@ async function closeMatch(event) {
           previousResult: {
             scoreA: match.scoreA,
             scoreB: match.scoreB,
-            winnerTeam: match.winnerTeam,
-            ratingDelta: match.ratingDelta
+            winnerTeam: match.winnerTeam
           },
           correctedAt: firebase.firestore.FieldValue.serverTimestamp(),
           correctedByUid: user.uid
@@ -767,8 +770,8 @@ async function closeMatch(event) {
     openMatch(saved.match);
     document.getElementById('activeMatchNotice').textContent = saved.outcome === 'conflict'
       ? 'Il risultato è stato modificato da un’altra scheda mentre lo correggevi. La tua correzione non è stata salvata. Qui vedi il risultato aggiornato: controllalo e premi CORREGGI RISULTATO se serve.'
-      : saved.outcome === 'corrected' ? 'Correzione salvata. Classifica e storico useranno il nuovo risultato.'
-      : saved.outcome === 'unchanged' ? 'Questo risultato è già stato salvato. Non sono stati assegnati altri punti.' : '';
+      : saved.outcome === 'corrected' ? 'Correzione salvata. Elo e storico sono ricalcolati anche per tutte le partite successive del mese.'
+      : saved.outcome === 'unchanged' ? 'Questo risultato è già stato salvato. Nessuna partita è stata conteggiata due volte.' : '';
   } catch (error) {
     console.error('Errore salvataggio risultato:', error);
     resultSaveMessage.textContent = error.code === 'permission-denied'
@@ -789,7 +792,9 @@ function snapshotMatches(snapshot) {
 }
 
 async function loadSeasonMatches(seasonId) {
-  return snapshotMatches(await db.collection('matches').where('seasonId', '==', seasonId).get());
+  const matches = snapshotMatches(await db.collection('matches').where('seasonId', '==', seasonId).get());
+  const state = calculateSeasonState(matches, availablePlayers, seasonId);
+  return matches.map(match => ({ ...match, elo: state.matchDeltas.get(match.id) }));
 }
 
 function textElement(tag, text, className) {
@@ -807,7 +812,8 @@ function renderMatches(container, matches, emptyText) {
     const date = match.createdAt?.toDate?.();
     card.appendChild(textElement('p', date ? date.toLocaleString('it-IT', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : match.seasonId, 'small-label'));
     card.appendChild(textElement('p', `${match.teamA.join(' + ')} / ${match.teamB.join(' + ')}`));
-    card.appendChild(textElement('strong', match.status === 'completed' ? `${match.scoreA} – ${match.scoreB} · ±${match.ratingDelta} punti` : 'In corso'));
+    card.appendChild(textElement('strong', match.status === 'completed' ? `${match.scoreA} – ${match.scoreB}` : 'In corso'));
+    if (match.status === 'completed') card.appendChild(textElement('p', resultDescription(match), 'scoring-rule'));
     if (match.correctionCount) {
       card.appendChild(textElement('p', `Corretto · prima ${match.previousResult.scoreA} – ${match.previousResult.scoreB}`, 'correction-note'));
     }
@@ -819,26 +825,73 @@ function renderMatches(container, matches, emptyText) {
   });
 }
 
-// Il registro delle partite è la fonte dei punti mensili: niente incrementi duplicabili
-// o contatori players da sincronizzare. Ogni matchId contribuisce una sola volta.
-function calculateRanking(matches, roster = availablePlayers) {
-  const rows = new Map(roster.map(player => [player.name, { name: player.name, rating: 1000, games: 0, wins: 0, losses: 0 }]));
-  const seen = new Set();
-  matches.forEach(match => {
-    if (match.status !== 'completed' || seen.has(match.id)) return;
-    seen.add(match.id);
+// Fonte di verità: solo risultati completed, in ordine di creazione immutabile.
+// correctedAt e completedAt non spostano una partita nella sequenza Elo.
+function compareMatchChronology(a, b) {
+  const timestamp = match => {
+    const value = match.createdAt;
+    if (Number.isFinite(value?.seconds)) return [value.seconds, value.nanoseconds || 0];
+    const millis = value?.toMillis?.();
+    if (Number.isFinite(millis)) return [Math.floor(millis / 1000), (millis % 1000) * 1000000];
+    throw new Error('Data di creazione mancante per la partita ' + match.id);
+  };
+  const left = timestamp(a), right = timestamp(b);
+  return left[0] - right[0] || left[1] - right[1] || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+function calculateSeasonState(matches, roster = availablePlayers, seasonId) {
+  const seasons = new Set(matches.map(match => match.seasonId));
+  if (seasonId === undefined) {
+    if (seasons.size > 1) throw new Error('Seleziona una sola stagione per il calcolo Elo.');
+    seasonId = seasons.values().next().value;
+  }
+  const rows = new Map();
+  const ensurePlayer = name => {
+    if (!rows.has(name)) rows.set(name, {name, rating: 1000, games: 0, wins: 0, losses: 0});
+    return rows.get(name);
+  };
+  roster.forEach(player => ensurePlayer(player.name));
+  const matchDeltas = new Map();
+  const completed = matches.filter(match => match.seasonId === seasonId && match.status === 'completed');
+  // Validate even a single match (Array.sort need not call the comparator).
+  completed.forEach(match => compareMatchChronology(match, match));
+  completed.sort(compareMatchChronology).forEach(match => {
+    if (typeof match.id !== 'string' || !match.id) throw new Error('ID partita mancante.');
+    if (matchDeltas.has(match.id)) return;
+    if (!Array.isArray(match.teamA) || !Array.isArray(match.teamB) ||
+        match.teamA.length !== 2 || match.teamB.length !== 2 ||
+        new Set([...match.teamA, ...match.teamB]).size !== 4 ||
+        ![...match.teamA, ...match.teamB].every(name => typeof name === 'string' && name.trim())) {
+      throw new Error('Squadre non valide nella partita ' + match.id);
+    }
     const result = calculateResult(match.scoreA, match.scoreB);
-    [['A', match.teamA], ['B', match.teamB]].forEach(([team, names]) => names.forEach(name => {
-      if (!rows.has(name)) rows.set(name, {name, rating:1000, games:0, wins:0, losses:0});
-      const row = rows.get(name);
-      const won = team === result.winnerTeam;
-      row.rating += won ? result.ratingDelta : -result.ratingDelta;
-      row.games++;
-      row.wins += Number(won);
-      row.losses += Number(!won);
-    }));
+    const ratingA = match.teamA.reduce((sum, name) => sum + ensurePlayer(name).rating, 0) / 2;
+    const ratingB = match.teamB.reduce((sum, name) => sum + ensurePlayer(name).rating, 0) / 2;
+    const expectedA = 1 / (1 + 10 ** ((ratingB - ratingA) / 400));
+    const K = 32;
+    const actualA = result.winnerTeam === 'A' ? 1 : 0;
+    const gap = Math.abs(match.scoreA - match.scoreB);
+    const marginMultiplier = 1 + gap / 10;
+    const baseDelta = K * (actualA - expectedA);
+    const deltaA = Math.round(baseDelta * marginMultiplier);
+    const deltaB = -deltaA;
+    matchDeltas.set(match.id, {ratingA, ratingB, expectedA, gap, marginMultiplier, baseDelta, deltaA, deltaB});
+    [['A', match.teamA, deltaA], ['B', match.teamB, deltaB]].forEach(([team, names, delta]) => {
+      names.forEach(name => {
+        const row = ensurePlayer(name);
+        const won = team === result.winnerTeam;
+        row.rating += delta;
+        row.games++;
+        row.wins += Number(won);
+        row.losses += Number(!won);
+      });
+    });
   });
-  return [...rows.values()].sort((a,b) => b.rating - a.rating || a.name.localeCompare(b.name, 'it'));
+  return {seasonId, ranking: [...rows.values()].sort((a,b) => b.rating - a.rating || a.name.localeCompare(b.name, 'it')), matchDeltas};
+}
+
+function calculateRanking(matches, roster = availablePlayers) {
+  return calculateSeasonState(matches, roster).ranking;
 }
 
 function renderRanking(container, rows) {
@@ -850,7 +903,7 @@ function renderRanking(container, rows) {
     previousRating = row.rating;
     const entry = textElement('article', '', 'ranking-row');
     entry.appendChild(textElement('strong', `${position}. ${row.name}`));
-    entry.appendChild(textElement('strong', `${row.rating} pt`, 'rating-value'));
+    entry.appendChild(textElement('strong', `${row.rating} Elo`, 'rating-value'));
     entry.appendChild(textElement('small', `${row.games} ${row.games === 1 ? 'partita' : 'partite'} · Vittorie: ${row.wins} · Sconfitte: ${row.losses}`));
     container.appendChild(entry);
   });
@@ -877,7 +930,7 @@ async function refreshHome() {
       if (index === 0 || row.rating !== ranked[index - 1].rating) rank = index + 1;
       const item = textElement('div', `${rank}°`);
       item.appendChild(textElement('strong', row.name));
-      item.appendChild(textElement('small', `${row.rating} pt`));
+      item.appendChild(textElement('small', `${row.rating} Elo`));
       podium.appendChild(item);
     });
     if (!ranked.length) podium.appendChild(textElement('p','La classifica inizierà con la prima partita conclusa.','empty-state'));
@@ -970,7 +1023,7 @@ async function refreshPlayers() {
       button.type = 'button';
       button.setAttribute('aria-label', `Statistiche di ${row.name}`);
       button.appendChild(textElement('span', row.name, 'player-profile-name'));
-      button.appendChild(textElement('strong', `${row.rating} pt`, 'rating-value'));
+      button.appendChild(textElement('strong', `${row.rating} Elo`, 'rating-value'));
       button.appendChild(textElement('small', `${row.games} ${row.games === 1 ? 'partita' : 'partite'} · Vittorie: ${row.wins} · Sconfitte: ${row.losses}`));
       button.addEventListener('click', () => openPlayerProfile(row.name));
       directory.appendChild(button);

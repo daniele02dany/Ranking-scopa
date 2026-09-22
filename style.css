@@ -440,3 +440,24 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f3d57a; outline-
   .home-header { flex-wrap: wrap; }
   .bottom-nav button { font-size: 10px; }
 }
+
+
+.hall-of-fame-entry { margin-bottom: 26px; }
+#hallOfFameScreen > h2 { font-size: clamp(24px, 7vw, 32px); margin-bottom: 20px; }
+.palmares-card, .season-archive-card {
+  margin-top: 22px; padding: 22px; text-align: left;
+  border: 1px solid #514125; border-radius: 18px;
+  background: linear-gradient(145deg, #1c1b19, #0d0d0d);
+  overflow-wrap: anywhere;
+}
+.palmares-card { border-color: #897039; background: linear-gradient(145deg, #292115, #111); }
+.palmares-card h3, .season-archive-card h3 { color: #f3d57a; font-size: 17px; letter-spacing: 2px; line-height: 1.5; }
+.palmares-card ul, .season-archive-podium { list-style: none; padding: 0; margin-top: 16px; }
+.palmares-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; padding: 12px 0; border-top: 1px solid #493d28; line-height: 1.5; }
+.palmares-row span { color: #d7c8ab; font-size: 13px; }
+.season-archive-month { margin-top: 6px; color: #b5aa95; font-size: 12px; letter-spacing: 2px; }
+.season-archive-podium li { display: flex; align-items: baseline; gap: 12px; padding: 10px 0; line-height: 1.5; }
+.season-archive-podium li:first-child strong { color: #f3d57a; }
+.season-archive-award { margin-top: 14px; padding: 16px; border-left: 2px solid #81263b; background: #2d101850; border-radius: 0 10px 10px 0; }
+.season-archive-award h4 { color: #d7c8ab; font-size: 11px; letter-spacing: 2px; }
+.season-archive-award p { margin-top: 8px; line-height: 1.5; }

@@ -119,7 +119,7 @@ function showScreen(screen) {
 
 function updateNavigationState(screen = document.querySelector('.screen.active')) {
   const section = {
-    homeScreen: 'home', rankingScreen: 'ranking', historyScreen: 'history',
+    homeScreen: 'home', rankingScreen: 'ranking', historyScreen: 'history', hallOfFameScreen: 'history',
     newMatchScreen: 'play', drawResultScreen: 'play',
     playersScreen: 'players', playerProfileScreen: 'players',
     matchInProgressScreen: currentMatch?.status === 'completed' ? 'history' : 'play',
@@ -185,6 +185,9 @@ function navigateTo(destination) {
     if (!historyMonth.value) historyMonth.value = getSeasonId();
     showScreen(document.getElementById('historyScreen'));
     refreshHistory();
+  } else if (destination === 'hallOfFame') {
+    showScreen(document.getElementById('hallOfFameScreen'));
+    refreshHallOfFame();
   } else if (destination === 'players') {
     if (!playersMonth.value) playersMonth.value = getSeasonId();
     showScreen(document.getElementById('playersScreen'));
@@ -1072,3 +1075,116 @@ profileMonth.addEventListener('change', () => {
 document.getElementById('refreshPlayersButton').addEventListener('click',refreshPlayers);
 document.getElementById('refreshProfileButton').addEventListener('click',refreshPlayers);
 document.getElementById('backToPlayersButton').addEventListener('click',() => navigateTo('players'));
+
+
+// Archived seasons are read-only snapshots, independent of the live Elo ranking.
+// Future admin closure may add final statistics and awards without changing this reader.
+let hallOfFameRequest = 0;
+
+async function loadClosedSeasons() {
+  const snapshot = await db.collection('seasons').where('closed', '==', true).get();
+  const seasons = [];
+  snapshot.forEach(doc => {
+    const data = doc.data();
+    if (data.closed !== true) return;
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(doc.id) || data.seasonId !== doc.id ||
+        data.year !== Number(doc.id.slice(0, 4)) || data.month !== Number(doc.id.slice(5)) ||
+        !Array.isArray(data.podium) || !data.podium.length ||
+        !data.podium.some(entry => entry?.position === 1) ||
+        !data.podium.every(entry => entry && Number.isInteger(entry.position) && entry.position >= 1 && entry.position <= 3 &&
+          typeof entry.player === 'string' && entry.player.trim()) ||
+        new Set(data.podium.map(entry => entry.player)).size !== data.podium.length ||
+        !Array.isArray(data.napoleon) || !data.napoleon.every(name => typeof name === 'string' && name.trim()) ||
+        (data.name != null && typeof data.name !== 'string')) {
+      throw new Error('Dati stagione non validi: ' + doc.id);
+    }
+    seasons.push({...data, podium: [...data.podium].sort((a,b) => a.position - b.position || a.player.localeCompare(b.player, 'it'))});
+  });
+  return seasons.sort((a,b) => b.seasonId.localeCompare(a.seasonId));
+}
+
+function calculateSeasonPalmares(seasons) {
+  const victories = new Map();
+  const seen = new Set();
+  seasons.forEach(season => {
+    if (season.closed !== true || seen.has(season.seasonId)) return;
+    seen.add(season.seasonId);
+    const winners = new Set(season.podium.filter(entry => entry.position === 1).map(entry => entry.player));
+    winners.forEach(player => victories.set(player, (victories.get(player) || 0) + 1));
+  });
+  return [...victories].map(([player, wins]) => ({player, wins}))
+    .sort((a,b) => b.wins - a.wins || a.player.localeCompare(b.player, 'it'));
+}
+
+function renderHallOfFame(seasons) {
+  const archived = seasons.filter(season => season.closed === true)
+    .sort((a,b) => b.seasonId.localeCompare(a.seasonId));
+  const palmares = document.getElementById('seasonPalmares');
+  const list = document.getElementById('closedSeasonsList');
+  palmares.replaceChildren();
+  list.replaceChildren();
+  document.getElementById('hallOfFameContent').hidden = !archived.length;
+  document.getElementById('hallOfFameMessage').textContent = archived.length ? '' : 'Nessuna stagione archiviata.';
+  calculateSeasonPalmares(archived).forEach(row => {
+    const item = textElement('li', '', 'palmares-row');
+    item.appendChild(textElement('strong', row.player));
+    item.appendChild(textElement('span', `${row.wins} ${row.wins === 1 ? 'vittoria mensile' : 'vittorie mensili'}`));
+    palmares.appendChild(item);
+  });
+  archived.forEach(season => {
+    const card = textElement('article', '', 'season-archive-card');
+    const month = new Date(season.year, season.month - 1, 1).toLocaleDateString('it-IT', {month:'long', year:'numeric'}).toUpperCase();
+    const name = season.name?.trim();
+    card.appendChild(textElement('h3', name ? name.toLocaleUpperCase('it-IT') : month));
+    if (name) card.appendChild(textElement('p', month, 'season-archive-month'));
+    const podium = textElement('ul', '', 'season-archive-podium');
+    [...season.podium].sort((a,b) => a.position - b.position || a.player.localeCompare(b.player, 'it')).forEach(entry => {
+      const item = textElement('li', '');
+      const medal = textElement('span', ['🥇','🥈','🥉'][entry.position - 1]);
+      medal.setAttribute('aria-label', `${entry.position}° posto`);
+      item.appendChild(medal);
+      item.appendChild(textElement('strong', entry.player));
+      podium.appendChild(item);
+    });
+    card.appendChild(podium);
+    if (season.napoleon.length) {
+      const award = textElement('div', '', 'season-archive-award');
+      award.appendChild(textElement('h4', '🏅 NAPOLEONE'));
+      award.appendChild(textElement('p', season.napoleon.join(' · ')));
+      card.appendChild(award);
+    }
+    list.appendChild(card);
+  });
+}
+
+async function refreshHallOfFame() {
+  const request = ++hallOfFameRequest;
+  const screen = document.getElementById('hallOfFameScreen');
+  const message = document.getElementById('hallOfFameMessage');
+  document.getElementById('hallOfFameContent').hidden = true;
+  document.getElementById('seasonPalmares').replaceChildren();
+  document.getElementById('closedSeasonsList').replaceChildren();
+  screen.setAttribute('aria-busy', 'true');
+  message.textContent = 'Caricamento stagioni…';
+  try {
+    const seasons = await loadClosedSeasons();
+    if (request !== hallOfFameRequest) return;
+    renderHallOfFame(seasons);
+  } catch (error) {
+    if (request !== hallOfFameRequest) return;
+    console.error('Errore caricamento Hall of Fame:', error);
+    message.textContent = error.code === 'permission-denied'
+      ? 'Accesso alle stagioni non autorizzato. Verifica le regole di lettura della collection seasons e premi AGGIORNA.'
+      : 'Impossibile caricare le stagioni. Verifica la connessione e i dati archiviati, poi premi AGGIORNA.';
+  } finally {
+    if (request === hallOfFameRequest) screen.setAttribute('aria-busy', 'false');
+  }
+}
+
+function openHallOfFame() {
+  navigateTo('hallOfFame');
+}
+
+document.getElementById('hallOfFameButton').addEventListener('click', openHallOfFame);
+document.getElementById('refreshHallOfFameButton').addEventListener('click', refreshHallOfFame);
+document.getElementById('backToHistoryButton').addEventListener('click', () => navigateTo('history'));

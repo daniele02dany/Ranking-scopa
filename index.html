@@ -233,12 +233,28 @@
 
 <section id="historyScreen" class="screen">
   <h2>STORICO PARTITE</h2>
+  <button id="hallOfFameButton" class="primary-button hall-of-fame-entry" type="button">♛ HALL OF FAME</button>
   <label class="month-label" for="historyMonth">Mese della partita</label>
   <input id="historyMonth" class="month-input" type="month">
   <button id="refreshHistoryButton" class="secondary-button">AGGIORNA</button>
   <p id="historyMessage" class="match-message" role="status"></p>
   <div id="historyList"></div>
   <button class="secondary-button" data-go-home>TORNA ALLA HOME</button>
+</section>
+
+<section id="hallOfFameScreen" class="screen">
+  <p class="small-label">LE STAGIONI CONCLUSE</p>
+  <h2>♛ HALL OF FAME</h2>
+  <button id="backToHistoryButton" class="secondary-button" type="button">← TORNA ALLO STORICO</button>
+  <button id="refreshHallOfFameButton" class="secondary-button" type="button">AGGIORNA</button>
+  <p id="hallOfFameMessage" class="match-message" role="status" aria-live="polite"></p>
+  <div id="hallOfFameContent" hidden>
+    <section class="palmares-card" aria-labelledby="palmaresTitle">
+      <h3 id="palmaresTitle">PALMARÈS</h3>
+      <ul id="seasonPalmares"></ul>
+    </section>
+    <div id="closedSeasonsList"></div>
+  </div>
 </section>
 
 <section id="rankingScreen" class="screen">

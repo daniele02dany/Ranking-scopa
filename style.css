@@ -466,3 +466,47 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f3d57a; outline-
 .season-lifecycle-message { max-width: 520px; margin: 0 auto; padding: 14px 24px; color: #d7c8ab; background: #221a10; font-size: 13px; line-height: 1.6; }
 .season-lifecycle-message:empty { display: none; }
 .weak-ring-award { border-left-color: #87785c; background: #302c2350; }
+
+.profile-career-card, .profile-details { margin-top: 20px; padding: 18px; border: 1px solid #514125; border-radius: 16px; background: linear-gradient(145deg, #1d1b18, #101010); text-align: left; }
+.profile-career-card h3, .profile-details summary { color: #f3d57a; font-size: 13px; letter-spacing: 1.5px; line-height: 1.6; }
+.napoleon-player-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.napoleon-player-button { min-height: 44px; padding: 10px 14px; border: 1px solid #625039; border-radius: 12px; color: #e8dcc7; background: #161412; cursor: pointer; overflow-wrap: anywhere; max-width: 100%; }
+.napoleon-player-button[aria-pressed="true"] { color: #111; background: #d5af45; border-color: #f3d57a; font-weight: 700; }
+.profile-details summary { cursor: pointer; min-height: 28px; }
+.profile-details summary:focus-visible { outline: 2px solid #f3d57a; outline-offset: 4px; }
+.profile-detail-list { margin-top: 12px; }
+.profile-detail-row { padding: 12px 0; border-top: 1px solid #393024; }
+.profile-detail-row dt { font-size: 12px; color: #bfb19a; line-height: 1.5; }
+.profile-detail-row dd { margin-top: 5px; font-size: 16px; font-weight: 700; color: #f3e6ca; line-height: 1.5; overflow-wrap: anywhere; }
+.profile-detail-row small { display: block; margin-top: 3px; color: #bfb19a; font-size: 12px; font-weight: 400; }
+.profile-career-card { border-color: #897039; }
+.profile-career-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; margin-top: 14px; }
+.profile-career-grid dd { color: #f3d57a; font-size: 26px; }
+
+/* Compact match events and statistics, mobile first. */
+.match-napoleon { margin-top: 20px; padding: 12px; border: 1px solid #403526; border-radius: 12px; text-align: left; }
+.match-napoleon legend { color: #c6ad77; font-size: 11px; letter-spacing: 1.5px; }
+.match-napoleon .napoleon-player-list { margin-top: 0; }
+.match-summary.match-card, .match-summary.match-compact { display: block; width: 100%; color: #ece5d7; background: #171615; border: 1px solid #443a2c; border-radius: 12px; padding: 14px; margin: 10px 0; text-align: left; cursor: pointer; font: inherit; }
+.match-summary:focus-visible, .history-filter:focus-visible { outline: 2px solid #d5af45; outline-offset: 3px; }
+.match-team-row { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 5px 0; }
+.match-team-row span { min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+.match-team-row strong { font-size: 22px; color: #f3d57a; }
+.match-meta { display: block; color: #b4a995; font-size: 11px; margin-top: 10px; line-height: 1.6; }
+.correction-badge { display: inline-block; margin-top: 8px; padding: 3px 6px; color: #d5bc8c; background: #33281e; border-radius: 4px; font-size: 9px; letter-spacing: 1px; }
+.match-summary.match-compact { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; padding: 12px 8px; font-size: 12px; line-height: 1.5; }
+.match-compact span { min-width: 0; overflow-wrap: anywhere; }
+.match-compact span:last-child { text-align: right; }
+.match-compact strong { color: #f3d57a; white-space: nowrap; font-size: 16px; }
+.history-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0; }
+.history-filter { flex: 1 1 auto; min-height: 44px; border: 1px solid #4e4030; border-radius: 8px; background: #191716; color: #c4b9a5; font-size: 10px; padding: 8px; cursor: pointer; }
+.history-filter[aria-pressed="true"] { border-color: #b59952; background: #302718; color: #f3d57a; }
+.recent-form { display: flex; gap: 5px; align-items: center; font-size: 11px; }
+.form-mark { display: inline-block; padding: 3px 5px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.form-w { color: #d8c587; background: #302b1c; }
+.form-l { color: #c697a1; background: #321d23; }
+.ranking-row .recent-form { grid-column: 1 / -1; }
+.match-details { text-align: left; }
+.profile-stat-grid dd.recent-form { justify-content: center; min-height: 30px; }
+.profile-stat-grid div { padding: 14px 8px; }
+.big-play-button { margin-bottom: 24px; }

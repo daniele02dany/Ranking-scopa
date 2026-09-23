@@ -32,6 +32,45 @@ service cloud.firestore {
     }
     function validName(value) { return value is string && value.trim().size() > 0 && value.size() <= 200; }
 
+    function validAwardItem(items, index) {
+      return items.size() <= index || validName(items[index]);
+    }
+    function validAwards(items) {
+      return items is list && items.size() <= 32 && items.toSet().size() == items.size()
+        && validAwardItem(items, 0)
+        && validAwardItem(items, 1)
+        && validAwardItem(items, 2)
+        && validAwardItem(items, 3)
+        && validAwardItem(items, 4)
+        && validAwardItem(items, 5)
+        && validAwardItem(items, 6)
+        && validAwardItem(items, 7)
+        && validAwardItem(items, 8)
+        && validAwardItem(items, 9)
+        && validAwardItem(items, 10)
+        && validAwardItem(items, 11)
+        && validAwardItem(items, 12)
+        && validAwardItem(items, 13)
+        && validAwardItem(items, 14)
+        && validAwardItem(items, 15)
+        && validAwardItem(items, 16)
+        && validAwardItem(items, 17)
+        && validAwardItem(items, 18)
+        && validAwardItem(items, 19)
+        && validAwardItem(items, 20)
+        && validAwardItem(items, 21)
+        && validAwardItem(items, 22)
+        && validAwardItem(items, 23)
+        && validAwardItem(items, 24)
+        && validAwardItem(items, 25)
+        && validAwardItem(items, 26)
+        && validAwardItem(items, 27)
+        && validAwardItem(items, 28)
+        && validAwardItem(items, 29)
+        && validAwardItem(items, 30)
+        && validAwardItem(items, 31);
+    }
+
     match /admins/{uid} {
       allow get: if signedIn() && request.auth.uid == uid;
       allow list, create, update, delete: if false;
@@ -62,6 +101,12 @@ service cloud.firestore {
           && data.createdAt == request.time
           && data.status == 'in_progress';
       }
+      function validMatchNapoleon() {
+        let data = request.resource.data;
+        return data.napoleon is list && data.napoleon.size() <= 4
+          && data.napoleon.toSet().size() == data.napoleon.size()
+          && data.teamA.concat(data.teamB).hasAll(data.napoleon);
+      }
       function validScore() {
         let data = request.resource.data;
         return data.status == 'completed'
@@ -78,9 +123,10 @@ service cloud.firestore {
         let data = request.resource.data;
         return resource.data.status == 'in_progress'
           && data.diff(resource.data).affectedKeys().hasOnly([
-            'status', 'scoreA', 'scoreB', 'winnerTeam', 'matchRevision', 'completedAt', 'completedByUid'
+            'status', 'scoreA', 'scoreB', 'winnerTeam', 'matchRevision', 'completedAt', 'completedByUid', 'completedByPlayer', 'napoleon'
           ])
-          && validScore()
+          && validScore() && validMatchNapoleon()
+          && validName(data.completedByPlayer)
           && data.completedByUid == request.auth.uid && data.completedAt == request.time;
       }
       function validCorrection() {
@@ -88,22 +134,23 @@ service cloud.firestore {
         let previous = resource.data;
         return previous.status == 'completed'
           && data.diff(previous).affectedKeys().hasOnly([
-            'scoreA', 'scoreB', 'winnerTeam', 'matchRevision',
+            'scoreA', 'scoreB', 'winnerTeam', 'matchRevision', 'napoleon',
             'correctionCount', 'previousResult', 'correctedAt', 'correctedByUid'
           ])
-          && validScore()
-          && (data.scoreA != previous.scoreA || data.scoreB != previous.scoreB)
+          && validScore() && validMatchNapoleon()
+          && (data.scoreA != previous.scoreA || data.scoreB != previous.scoreB
+            || data.napoleon.toSet() != previous.get('napoleon', []).toSet())
           && data.correctionCount is int
           && data.correctionCount == previous.get('correctionCount', 0) + 1
           && data.previousResult == {
-            'scoreA': previous.scoreA, 'scoreB': previous.scoreB, 'winnerTeam': previous.winnerTeam
+            'scoreA': previous.scoreA, 'scoreB': previous.scoreB, 'winnerTeam': previous.winnerTeam, 'napoleon': previous.get('napoleon', [])
           }
           && data.correctedByUid == request.auth.uid && data.correctedAt == request.time;
       }
       function validCancellation() {
         let data = request.resource.data;
         let resultFields = [
-          'scoreA', 'scoreB', 'winnerTeam', 'completedAt', 'completedByUid',
+          'scoreA', 'scoreB', 'winnerTeam', 'completedAt', 'completedByUid', 'completedByPlayer', 'napoleon',
           'correctionCount', 'previousResult', 'correctedAt', 'correctedByUid', 'ratingDelta'
         ];
         return resource.data.status == 'completed' && data.status == 'in_progress'
@@ -164,44 +211,6 @@ service cloud.firestore {
           && validPodiumItem(items, 30)
           && validPodiumItem(items, 31);
       }
-      function validAwardItem(items, index) {
-        return items.size() <= index || validName(items[index]);
-      }
-      function validAwards(items) {
-        return items is list && items.size() <= 32 && items.toSet().size() == items.size()
-          && validAwardItem(items, 0)
-          && validAwardItem(items, 1)
-          && validAwardItem(items, 2)
-          && validAwardItem(items, 3)
-          && validAwardItem(items, 4)
-          && validAwardItem(items, 5)
-          && validAwardItem(items, 6)
-          && validAwardItem(items, 7)
-          && validAwardItem(items, 8)
-          && validAwardItem(items, 9)
-          && validAwardItem(items, 10)
-          && validAwardItem(items, 11)
-          && validAwardItem(items, 12)
-          && validAwardItem(items, 13)
-          && validAwardItem(items, 14)
-          && validAwardItem(items, 15)
-          && validAwardItem(items, 16)
-          && validAwardItem(items, 17)
-          && validAwardItem(items, 18)
-          && validAwardItem(items, 19)
-          && validAwardItem(items, 20)
-          && validAwardItem(items, 21)
-          && validAwardItem(items, 22)
-          && validAwardItem(items, 23)
-          && validAwardItem(items, 24)
-          && validAwardItem(items, 25)
-          && validAwardItem(items, 26)
-          && validAwardItem(items, 27)
-          && validAwardItem(items, 28)
-          && validAwardItem(items, 29)
-          && validAwardItem(items, 30)
-          && validAwardItem(items, 31);
-      }
       function validClosure() {
         let data = request.resource.data;
         return validSeasonId(seasonId) && request.time >= seasonEnd(seasonId)
@@ -216,14 +225,13 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if isSeasonAdmin() && validClosure()
         && request.resource.data.keys().hasOnly(['seasonId','year','month','name','closed','closedAt','podium','napoleon','weakRing'])
-        && request.resource.data.name == '' && request.resource.data.napoleon.size() == 0;
-      // Only finalization of a Console-created draft is allowed. Preserve awards/name.
+        && request.resource.data.name == '';
+      // Finalize an open season only: preserve its name. The authorized admin derives awards from matches.
       allow update: if isSeasonAdmin() && resource.data.get('closed', false) == false && validClosure()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'seasonId','year','month','name','closed','closedAt','podium','napoleon','weakRing'
         ])
-        && request.resource.data.name == resource.data.get('name', '')
-        && request.resource.data.napoleon == resource.data.get('napoleon', []);
+        && request.resource.data.name == resource.data.get('name', '');
       allow delete: if false;
     }
   }

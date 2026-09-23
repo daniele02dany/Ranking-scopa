@@ -137,7 +137,7 @@ function updateNavigationState(screen = document.querySelector('.screen.active')
 }
 
 function updateNavigationLock() {
-  const busy = isCreatingMatch || isClosingMatch;
+  const busy = isCreatingMatch || isClosingMatch || isDrawing;
   bottomNav.setAttribute('aria-busy', String(busy));
   document.querySelectorAll('#bottomNav button, #draftResumeBar button').forEach(button => button.disabled = busy);
 }
@@ -145,11 +145,11 @@ function updateNavigationLock() {
 function pauseResultForm() {
   if (!resultScreen.classList.contains('active')) return;
   const changed = resultMode === 'correction'
-    ? scoreAInput.value !== String(correctionBasis.scoreA) || scoreBInput.value !== String(correctionBasis.scoreB)
-    : scoreAInput.value !== '' || scoreBInput.value !== '';
+    ? scoreAInput.value !== String(correctionBasis.scoreA) || scoreBInput.value !== String(correctionBasis.scoreB) || !sameNapoleon(resultNapoleon, correctionBasis.napoleon)
+    : scoreAInput.value !== '' || scoreBInput.value !== '' || resultNapoleon.length > 0;
   pausedResult = changed ? {
     match: currentMatch, mode: resultMode, basis: correctionBasis,
-    scoreA: scoreAInput.value, scoreB: scoreBInput.value
+    scoreA: scoreAInput.value, scoreB: scoreBInput.value, napoleon:[...resultNapoleon]
   } : null;
 }
 
@@ -175,11 +175,12 @@ async function resumeResultForm() {
   correctionBasis = draft.basis;
   scoreAInput.value = draft.scoreA;
   scoreBInput.value = draft.scoreB;
+  resultNapoleon = [...draft.napoleon]; renderResultNapoleon();
   updateResultPreview();
 }
 
 function navigateTo(destination) {
-  if (isCreatingMatch || isClosingMatch || !auth.currentUser || !localStorage.getItem('rankingScopaPlayer')) return;
+  if (isDrawing || isCreatingMatch || isClosingMatch || !auth.currentUser || !localStorage.getItem('rankingScopaPlayer')) return;
   syncCurrentSeason();
   pauseResultForm();
   if (destination === 'home') {
@@ -212,7 +213,6 @@ let availablePlayers = [];
 
 let currentDraw = null;
 
-let previousDraw = null;
 async function createPlayerButtons() {
   playerList.innerHTML = "";
 
@@ -403,76 +403,22 @@ function isSameDraw(drawA, drawB) {
   );
 
 }
-function generateDraw(selectedPlayers) {
-
-  let attempts = 0;
-
-  let draw;
-
-  do {
-
-    const shuffled =
-      shufflePlayers(selectedPlayers);
-
-    draw = {
-      teamA: [
-        shuffled[0],
-        shuffled[1]
-      ],
-
-      teamB: [
-        shuffled[2],
-        shuffled[3]
-      ],
-
-      excluded:
-        shuffled.slice(4)
-    };
-
-    attempts++;
-
-  } while (
-    isSameDraw(draw, previousDraw) &&
-    attempts < 50
-  );
-
-  // Garantisce un sorteggio diverso anche dopo 50 tentativi uguali.
-  if (isSameDraw(draw, previousDraw)) {
-    [draw.teamA[1], draw.teamB[0]] =
-      [draw.teamB[0], draw.teamA[1]];
-  }
-
-  return draw;
+function generateDraw(selectedPlayers, history = []) {
+  const shuffled = shufflePlayers(selectedPlayers);
+  const chosen = shuffled.slice(0,4);
+  let split;
+  try { split = chooseBalancedRandomSplit(chosen, history); }
+  catch (error) { split = chooseBalancedRandomSplit(chosen); }
+  // Randomize team labels too; exclusions remain a uniform random sample.
+  if (secureRandomInt(2)) split = {teamA:split.teamB, teamB:split.teamA};
+  return {...split, excluded:shuffled.slice(4)};
 }
-drawButton.addEventListener(
-  "click",
-  () => {
+drawButton.addEventListener('click', () => {
+  const selected = Array.from(matchPlayerList.querySelectorAll('input[type="checkbox"]:checked')).map(input => input.value);
+  if (selected.length < 4) { alert('Devi selezionare almeno 4 giocatori.'); return; }
+  return drawSelectedPlayers(selected);
+});
 
-    const checked =
-      matchPlayerList.querySelectorAll(
-        'input[type="checkbox"]:checked'
-      );
-
-    const selected =
-      Array.from(checked)
-        .map(input => input.value);
-
-    if (selected.length < 4) {
-
-      alert(
-        "Devi selezionare almeno 4 giocatori."
-      );
-
-      return;
-    }
-
-    currentDraw =
-      generateDraw(selected);
-
-    showDraw(currentDraw);
-
-  }
-);
 function showDraw(draw) {
   matchSaveMessage.textContent = "";
 
@@ -497,29 +443,11 @@ function showDraw(draw) {
   showScreen(drawResultScreen);
 
 }
-redrawButton.addEventListener(
-  "click",
-  () => {
+redrawButton.addEventListener('click', () => {
+  if (!currentDraw || isCreatingMatch || isDrawing) return;
+  return drawSelectedPlayers([...currentDraw.teamA,...currentDraw.teamB,...currentDraw.excluded]);
+});
 
-    if (!currentDraw || isCreatingMatch) {
-      return;
-    }
-
-    const allPlayers = [
-      ...currentDraw.teamA,
-      ...currentDraw.teamB,
-      ...currentDraw.excluded
-    ];
-
-    previousDraw = currentDraw;
-
-    currentDraw =
-      generateDraw(allPlayers);
-
-    showDraw(currentDraw);
-
-  }
-);
 cancelDrawButton.addEventListener(
   "click",
   () => {
@@ -537,7 +465,7 @@ function getSeasonId(date = new Date()) {
 }
 
 async function startMatch() {
-  if (isCreatingMatch || !currentDraw) return;
+  if (isCreatingMatch || isDrawing || !currentDraw) return;
   matchSaveMessage.textContent = "";
   const user = auth.currentUser;
   const playerName = localStorage.getItem("rankingScopaPlayer");
@@ -609,10 +537,13 @@ function openResultForm(mode) {
     id: currentMatch.id,
     scoreA: currentMatch.scoreA,
     scoreB: currentMatch.scoreB,
+    napoleon: getMatchNapoleon(currentMatch),
     correctionCount: currentMatch.correctionCount || 0,
     matchRevision: currentMatch.matchRevision || 0
   } : {id:currentMatch.id, matchRevision:currentMatch.matchRevision || 0};
   resultForm.reset();
+  resultNapoleon = correcting ? getMatchNapoleon(currentMatch) : [];
+  renderResultNapoleon();
   if (correcting) {
     scoreAInput.value = currentMatch.scoreA;
     scoreBInput.value = currentMatch.scoreB;
@@ -658,7 +589,8 @@ function calculateResult(scoreA, scoreB) {
 
 function readResult() {
   if (!scoreAInput.value.trim() || !scoreBInput.value.trim()) throw new Error('Inserisci il punteggio di entrambe le squadre.');
-  return calculateResult(Number(scoreAInput.value), Number(scoreBInput.value));
+  return {...calculateResult(Number(scoreAInput.value), Number(scoreBInput.value)),
+    napoleon:validateMatchNapoleon(currentMatch, resultNapoleon)};
 }
 
 function resultDescription(match) {
@@ -674,8 +606,8 @@ function updateResultPreview() {
     const winners = result.winnerTeam === 'A' ? currentMatch.teamA : currentMatch.teamB;
     resultPreview.textContent = `Vince ${winners.join(' + ')}. Elo mensile · K 32: la variazione sarà ricalcolata dal registro completo dopo il salvataggio.`;
     if (resultMode === 'correction' && correctionBasis) {
-      if (result.scoreA === correctionBasis.scoreA && result.scoreB === correctionBasis.scoreB) {
-        resultPreview.textContent = 'Il risultato è invariato. Modifica almeno uno dei due punteggi per correggerlo.';
+      if (result.scoreA === correctionBasis.scoreA && result.scoreB === correctionBasis.scoreB && sameNapoleon(result.napoleon, correctionBasis.napoleon)) {
+        resultPreview.textContent = 'Il risultato è invariato. Modifica il punteggio o il Napoleone per correggerlo.';
         confirmResultButton.disabled = true;
         return;
       }
@@ -690,9 +622,9 @@ function updateResultPreview() {
 
 let matchDetailRequest = 0;
 function paintMatchDetail(match) {
-  activeTeamAPlayers.textContent = match.teamA.join(' + ');
-  activeTeamBPlayers.textContent = match.teamB.join(' + ');
-  activeExcludedPlayers.textContent = match.excluded.join(', ') || 'Nessuno';
+  activeTeamAPlayers.textContent = teamDescription(match, match.teamA);
+  activeTeamBPlayers.textContent = teamDescription(match, match.teamB);
+  activeExcludedPlayers.textContent = (match.excluded || []).join(', ') || 'Nessuno';
   activeMatchSeason.textContent = 'STAGIONE ' + match.seasonId;
   const completed = match.status === 'completed';
   const editable = canManageMatch(match);
@@ -704,6 +636,7 @@ function paintMatchDetail(match) {
   document.getElementById('correctionInfo').textContent = completed && match.correctionCount && match.previousResult
     ? 'Risultato corretto ' + match.correctionCount + ' volte. Prima: ' + match.previousResult.scoreA + ' – ' + match.previousResult.scoreB + '.' : '';
   resultMessage.textContent = completed ? resultDescription(match) : '';
+  renderMatchMetadata(match);
   updateNavigationState();
 }
 
@@ -747,7 +680,7 @@ async function closeMatch(event) {
   const correcting = resultMode === 'correction';
   const expected = correctionBasis;
   if (correcting && (!expected || expected.id !== matchId)) return;
-  if (correcting && expected.scoreA === result.scoreA && expected.scoreB === result.scoreB) {
+  if (correcting && expected.scoreA === result.scoreA && expected.scoreB === result.scoreB && sameNapoleon(expected.napoleon, result.napoleon)) {
     resultSaveMessage.textContent = 'Il risultato è invariato: nessuna modifica da salvare.';
     return;
   }
@@ -762,14 +695,15 @@ async function closeMatch(event) {
       if (!snapshot.exists) throw new Error('La partita non esiste più.');
       const match = snapshot.data();
       await assertMatchEditable(transaction, match);
+      validateMatchNapoleon(match, result.napoleon);
       if (correcting) {
         if (match.status !== 'completed') throw new Error('La partita non risulta conclusa. Riaprila dalla Home.');
         const latest = { ...match, id: matchId };
         // Se una richiesta precedente è già riuscita, non crea una nuova correzione.
-        if (match.scoreA === result.scoreA && match.scoreB === result.scoreB) {
+        if (match.scoreA === result.scoreA && match.scoreB === result.scoreB && sameNapoleon(match.napoleon, result.napoleon)) {
           return { match: latest, outcome: 'unchanged' };
         }
-        if (match.scoreA !== expected.scoreA || match.scoreB !== expected.scoreB ||
+        if (match.scoreA !== expected.scoreA || match.scoreB !== expected.scoreB || !sameNapoleon(match.napoleon, expected.napoleon) ||
             (match.correctionCount || 0) !== expected.correctionCount ||
             (match.matchRevision || 0) !== expected.matchRevision) {
           return { match: latest, outcome: 'conflict' };
@@ -781,7 +715,8 @@ async function closeMatch(event) {
           previousResult: {
             scoreA: match.scoreA,
             scoreB: match.scoreB,
-            winnerTeam: match.winnerTeam
+            winnerTeam: match.winnerTeam,
+            napoleon: [...(match.napoleon || [])]
           },
           correctedAt: firebase.firestore.FieldValue.serverTimestamp(),
           correctedByUid: user.uid
@@ -797,7 +732,8 @@ async function closeMatch(event) {
         status: 'completed',
         matchRevision: (match.matchRevision || 0) + 1,
         completedAt: firebase.firestore.FieldValue.serverTimestamp(),
-        completedByUid: user.uid
+        completedByUid: user.uid,
+        completedByPlayer: localStorage.getItem('rankingScopaPlayer') || 'Non disponibile'
       };
       transaction.update(reference, update);
       return { match: { ...match, ...update, id: matchId }, outcome: 'completed' };
@@ -841,26 +777,33 @@ function textElement(tag, text, className) {
   return element;
 }
 
-function renderMatches(container, matches, emptyText) {
+function renderMatches(container, matches, emptyText, compact = false) {
   container.replaceChildren();
   if (!matches.length) container.appendChild(textElement('p', emptyText, 'empty-state'));
   matches.forEach(match => {
-    const card = textElement('article', '', 'match-summary');
-    const date = match.createdAt?.toDate?.();
-    card.appendChild(textElement('p', date ? date.toLocaleString('it-IT', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : match.seasonId, 'small-label'));
-    card.appendChild(textElement('p', `${match.teamA.join(' + ')} / ${match.teamB.join(' + ')}`));
-    card.appendChild(textElement('strong', match.status === 'completed' ? `${match.scoreA} – ${match.scoreB}` : 'In corso'));
-    if (match.status === 'completed') card.appendChild(textElement('p', resultDescription(match), 'scoring-rule'));
-    if (match.correctionCount) {
-      card.appendChild(textElement('p', `Corretto · prima ${match.previousResult.scoreA} – ${match.previousResult.scoreB}`, 'correction-note'));
+    const card = textElement('button', '', compact ? 'match-summary match-compact' : 'match-summary match-card');
+    card.type = 'button';
+    card.addEventListener('click', () => openMatch(match));
+    const completed = match.status === 'completed';
+    if (compact) {
+      card.appendChild(textElement('span', teamDescription(match,match.teamA)));
+      card.appendChild(textElement('strong', match.scoreA + '–' + match.scoreB));
+      card.appendChild(textElement('span', teamDescription(match,match.teamB)));
+    } else {
+      for (const [team,score] of [[match.teamA,match.scoreA],[match.teamB,match.scoreB]]) {
+        const row = textElement('span','','match-team-row');
+        row.appendChild(textElement('span',teamDescription(match,team)));
+        row.appendChild(textElement('strong',completed ? String(score) : '—'));
+        card.appendChild(row);
+      }
+      card.appendChild(textElement('small',matchDate(match) + (completed && match.completedByPlayer ? ' · Inserito da ' + match.completedByPlayer : ''),'match-meta'));
+      if (!completed) card.appendChild(textElement('small','IN CORSO','match-meta'));
+      if ((match.correctionCount || 0) > 0) card.appendChild(textElement('small','CORRETTO','correction-badge'));
     }
-    const button = textElement('button', match.status === 'completed' ? 'VEDI RISULTATO' : 'APRI PARTITA', 'secondary-button');
-    button.type = 'button';
-    button.addEventListener('click', () => openMatch(match));
-    card.appendChild(button);
     container.appendChild(card);
   });
 }
+
 
 // Fonte di verità: solo risultati completed, in ordine di creazione immutabile.
 // correctedAt e completedAt non spostano una partita nella sequenza Elo.
@@ -931,7 +874,8 @@ function calculateRanking(matches, roster = availablePlayers) {
   return calculateSeasonState(matches, roster).ranking;
 }
 
-function renderRanking(container, rows) {
+function renderRanking(container, rows, matches = []) {
+  const napoleon = countMatchNapoleons(matches);
   container.replaceChildren();
   let previousRating;
   let position = 0;
@@ -939,9 +883,12 @@ function renderRanking(container, rows) {
     if (row.rating !== previousRating) position = index + 1;
     previousRating = row.rating;
     const entry = textElement('article', '', 'ranking-row');
-    entry.appendChild(textElement('strong', `${position}. ${row.name}`));
+    entry.appendChild(textElement('strong', `${position}. ${row.name}${napoleonBadge(napoleon.get(row.name))}`));
     entry.appendChild(textElement('strong', `${row.rating} Elo`, 'rating-value'));
-    entry.appendChild(textElement('small', `${row.games} ${row.games === 1 ? 'partita' : 'partite'} · Vittorie: ${row.wins} · Sconfitte: ${row.losses}`));
+    entry.appendChild(textElement('small', `${row.games} ${row.games === 1 ? 'partita' : 'partite'} · ${row.wins}-${row.losses} W-L`));
+    const form = textElement('span','','recent-form');
+    renderRecentForm(form,getRecentForm(matches,row.name));
+    entry.appendChild(form);
     container.appendChild(entry);
   });
 }
@@ -957,7 +904,7 @@ async function refreshHome() {
     const matches = await loadSeasonMatches(month);
     if (request !== homeRequest) return;
     renderMatches(document.getElementById('openMatches'), matches.filter(match => match.status === 'in_progress'), 'Nessuna partita in corso.');
-    renderMatches(recentMatchesPreview, matches.filter(match => match.status === 'completed').slice(0,3), 'Nessuna partita conclusa questo mese.');
+    renderMatches(recentMatchesPreview, matches.filter(match => match.status === 'completed').slice(0,3), 'Nessuna partita conclusa questo mese.', true);
     const podium = document.getElementById('homePodium');
     podium.replaceChildren();
     const ranked = calculateRanking(matches).filter(row => row.games > 0);
@@ -983,13 +930,13 @@ async function refreshHistory() {
   const request = ++historyRequest;
   const month = historyMonth.value;
   const message = document.getElementById('historyMessage');
-  document.getElementById('historyList').replaceChildren();
+  historyMatches = []; renderHistory();
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) { message.textContent = 'Scegli un mese.'; return; }
   message.textContent = 'Caricamento…';
   try {
     const matches = await loadSeasonMatches(month);
     if (request !== historyRequest) return;
-    renderMatches(document.getElementById('historyList'), matches, 'Nessuna partita in questo mese.');
+    historyMatches = matches; renderHistory();
     message.textContent = '';
   } catch (error) {
     if (request === historyRequest) message.textContent = 'Impossibile caricare lo storico. Controlla la connessione e riprova.';
@@ -1007,7 +954,7 @@ async function refreshRanking() {
   try {
     const matches = await loadSeasonMatches(month);
     if (request !== rankingRequest) return;
-    renderRanking(document.getElementById('rankingList'), calculateRanking(matches));
+    renderRanking(document.getElementById('rankingList'), calculateRanking(matches), matches);
     message.textContent = '';
   } catch (error) {
     if (request === rankingRequest) message.textContent = 'Impossibile caricare la classifica. Controlla la connessione e riprova.';
@@ -1051,11 +998,24 @@ async function refreshPlayers() {
     return;
   }
   messages.forEach(message => message.textContent = 'Caricamento statistiche…');
+  playerCareerSeasons = null;
+  playerCareerError = 'Caricamento palmarès…';
+  renderPlayerCareer();
   try {
-    const matches = await loadSeasonMatches(seasonId);
+    const [monthly, career] = await Promise.allSettled([loadAllMatches(), loadClosedSeasons()]);
     if (request !== playersRequest) return;
-    const rows = calculateRanking(matches);
-    playersSeasonData = {seasonId, matches, rows};
+    playerCareerSeasons = career.status === 'fulfilled' ? career.value : null;
+    playerCareerError = career.status === 'fulfilled' ? '' : 'Palmarès non disponibile. Premi AGGIORNA per riprovare.';
+    playerCareerMatches = monthly.status === 'fulfilled' ? monthly.value : [];
+    if (monthly.status === 'rejected') playerCareerError = 'Conteggi Napoleone non disponibili. Premi AGGIORNA.';
+    renderPlayerCareer();
+    if (monthly.status === 'rejected') throw monthly.reason;
+    const raw = monthly.value.filter(match => match.seasonId === seasonId);
+    const replay = calculateSeasonState(raw, availablePlayers, seasonId);
+    const matches = raw.map(match => ({...match, elo:replay.matchDeltas.get(match.id)}));
+    const state = calculateSeasonState(matches, availablePlayers, seasonId);
+    const rows = state.ranking;
+    playersSeasonData = {seasonId, matches, rows, state};
     const directory = document.getElementById('playersDirectory');
     [...rows].sort((a,b) => a.name.localeCompare(b.name,'it')).forEach(row => {
       const button = textElement('button', '', 'player-profile-button');
@@ -1090,6 +1050,9 @@ function renderPlayerProfile() {
     || {name:profilePlayerName, rating:1000, games:0, wins:0, losses:0};
   document.getElementById('profileName').textContent = row.name;
   document.getElementById('profileRating').textContent = row.rating;
+  document.getElementById('profilePosition').textContent = (rows.findIndex(player => player.rating === row.rating) + 1) + '° posto';
+  document.getElementById('profileNapoleons').textContent = countMatchNapoleons(matches).get(row.name) || 0;
+  renderRecentForm(document.getElementById('profileForm'),getRecentForm(matches,row.name));
   const change = row.rating - 1000;
   document.getElementById('profileChange').textContent = `${change > 0 ? '+' : change < 0 ? '−' : ''}${Math.abs(change)} rispetto a inizio mese`;
   document.getElementById('profileGames').textContent = row.games;
@@ -1100,6 +1063,8 @@ function renderPlayerProfile() {
   const played = matches.filter(match => match.status === 'completed'
     && (match.teamA.includes(row.name) || match.teamB.includes(row.name)));
   renderMatches(document.getElementById('profileMatches'), played, 'Nessuna partita conclusa per questo giocatore nel mese scelto.');
+  renderPlayerAdvancedStats(calculatePlayerAdvancedStats(matches, row.name, playersSeasonData.seasonId, playersSeasonData.state));
+  renderPlayerCareer();
   document.getElementById('profileContent').hidden = false;
 }
 
@@ -1118,7 +1083,7 @@ document.getElementById('backToPlayersButton').addEventListener('click',() => na
 let hallOfFameRequest = 0;
 
 async function loadClosedSeasons() {
-  const snapshot = await db.collection('seasons').where('closed', '==', true).get({source:'server'});
+  const snapshot = await getClosedSeasonsSnapshot();
   const seasons = [];
   snapshot.forEach(doc => {
     const data = doc.data();
@@ -1153,7 +1118,7 @@ function calculateSeasonPalmares(seasons) {
     .sort((a,b) => b.wins - a.wins || a.player.localeCompare(b.player, 'it'));
 }
 
-function renderHallOfFame(seasons) {
+function renderHallOfFame(seasons, matches = []) {
   const archived = seasons.filter(season => season.closed === true)
     .sort((a,b) => b.seasonId.localeCompare(a.seasonId));
   const palmares = document.getElementById('seasonPalmares');
@@ -1169,6 +1134,7 @@ function renderHallOfFame(seasons) {
     palmares.appendChild(item);
   });
   archived.forEach(season => {
+    const napoleonCounts = getSeasonNapoleonCounts(season,matches);
     const card = textElement('article', '', 'season-archive-card');
     const month = new Date(season.year, season.month - 1, 1).toLocaleDateString('it-IT', {month:'long', year:'numeric'}).toUpperCase();
     const name = season.name?.trim();
@@ -1180,17 +1146,12 @@ function renderHallOfFame(seasons) {
       const medal = textElement('span', ['🥇','🥈','🥉'][entry.position - 1]);
       medal.setAttribute('aria-label', `${entry.position}° posto`);
       item.appendChild(medal);
-      item.appendChild(textElement('strong', entry.player));
+      item.appendChild(textElement('strong', entry.player + napoleonBadge(napoleonCounts.get(entry.player))));
       podium.appendChild(item);
     });
     card.appendChild(podium);
     if (!season.podium.length) card.appendChild(textElement('p', 'Nessuna partita conclusa: podio non assegnato.', 'scoring-rule'));
-    if (season.napoleon.length) {
-      const award = textElement('div', '', 'season-archive-award');
-      award.appendChild(textElement('h4', '🏅 NAPOLEONE'));
-      award.appendChild(textElement('p', season.napoleon.join(' · ')));
-      card.appendChild(award);
-    }
+
     if ((season.weakRing ?? []).length) {
       const award = textElement('div', '', 'season-archive-award weak-ring-award');
       award.appendChild(textElement('h4', '🔗 ANELLO DEBOLE'));
@@ -1212,9 +1173,9 @@ async function refreshHallOfFame() {
   screen.setAttribute('aria-busy', 'true');
   message.textContent = 'Caricamento stagioni…';
   try {
-    const seasons = await loadClosedSeasons();
+    const [seasons, matches] = await Promise.all([loadClosedSeasons(), loadAllMatches()]);
     if (request !== hallOfFameRequest) return;
-    renderHallOfFame(seasons);
+    renderHallOfFame(seasons, matches);
   } catch (error) {
     if (request !== hallOfFameRequest) return;
     console.error('Errore caricamento Hall of Fame:', error);
@@ -1240,7 +1201,7 @@ let seasonsCheckPromise = null;
 let observedSeasonId = null;
 let matchAccess = {id: null, editable: false};
 const RESULT_FIELDS = [
-  'scoreA', 'scoreB', 'winnerTeam', 'completedAt', 'completedByUid',
+  'scoreA', 'scoreB', 'winnerTeam', 'completedAt', 'completedByUid', 'completedByPlayer', 'napoleon',
   'correctionCount', 'previousResult', 'correctedAt', 'correctedByUid', 'ratingDelta'
 ];
 
@@ -1305,14 +1266,11 @@ async function closeSeasonAutomatically(seasonId) {
   const roster = [];
   playerSnapshot.forEach(doc => roster.push({...doc.data(), id:doc.id}));
   const awards = calculateSeasonAwards(matches, roster, seasonId);
-  return db.runTransaction(async transaction => {
+  const created = await db.runTransaction(async transaction => {
     const snapshot = await transaction.get(reference);
     if (snapshot.exists && snapshot.data().closed === true) return false;
     const previous = snapshot.exists ? snapshot.data() : {};
-    const napoleon = previous.napoleon ?? [];
-    if (!Array.isArray(napoleon) || !napoleon.every(name => typeof name === 'string' && name.trim())) {
-      throw new Error('Assegnazione Napoleone non valida per ' + seasonId);
-    }
+    const napoleon = [...countMatchNapoleons(matches).keys()].sort((a,b) => a.localeCompare(b,'it'));
     // Rules enforce the same bounded archive schema; never truncate tied winners.
     if ([awards.podium, awards.weakRing, napoleon].some(list => list.length > 32)) {
       throw new Error('Archivio oltre 32 nomi: occorre estendere la validazione delle regole.');
@@ -1325,6 +1283,8 @@ async function closeSeasonAutomatically(seasonId) {
     }, {merge:true});
     return true;
   });
+  if (created) invalidateClosedSeasons();
+  return created;
 }
 
 async function ensurePreviousSeasonsClosed() {
@@ -1336,7 +1296,7 @@ async function ensurePreviousSeasonsClosed() {
     message.textContent = 'Controllo delle stagioni precedenti…';
     const [matches, seasons] = await Promise.all([
       db.collection('matches').where('seasonId', '<', month).get({source:'server'}),
-      db.collection('seasons').where('closed', '==', true).get({source:'server'})
+      getClosedSeasonsSnapshot(true)
     ]);
     const closed = new Set();
     seasons.forEach(doc => closed.add(doc.id));
@@ -1430,3 +1390,325 @@ document.addEventListener('visibilitychange', () => {
     if (screen === 'resultScreen') updateResultPreview();
   }
 });
+
+
+// Monthly statistics consume the same complete season replay used by the ranking.
+function getPlayerSeasonGames(matches, playerName, seasonId, state) {
+  const seasonState = state || calculateSeasonState(matches, [], seasonId);
+  if (seasonState.seasonId !== seasonId) throw new Error('Statistiche e stagione non corrispondono.');
+  const seen = new Set();
+  return matches.filter(match => match.seasonId === seasonId && match.status === 'completed')
+    .sort(compareMatchChronology).filter(match => {
+      if (seen.has(match.id)) return false;
+      seen.add(match.id);
+      return match.teamA.includes(playerName) || match.teamB.includes(playerName);
+    }).map(match => {
+      const inA = match.teamA.includes(playerName);
+      const own = inA ? match.teamA : match.teamB;
+      const opponents = inA ? match.teamB : match.teamA;
+      const scoreFor = inA ? match.scoreA : match.scoreB;
+      const scoreAgainst = inA ? match.scoreB : match.scoreA;
+      const elo = seasonState.matchDeltas.get(match.id);
+      if (!elo) throw new Error('Variazione Elo mancante per ' + match.id);
+      return {id:match.id, won:scoreFor > scoreAgainst, scoreFor, scoreAgainst,
+        gap:Math.abs(scoreFor - scoreAgainst), teammate:own.find(name => name !== playerName),
+        opponents:[...opponents], delta:inA ? elo.deltaA : elo.deltaB};
+    });
+}
+
+function calculatePartnershipStats(games) {
+  const partners = new Map();
+  games.forEach(game => {
+    if (!partners.has(game.teammate)) partners.set(game.teammate, {name:game.teammate, games:0, wins:0, losses:0});
+    const row = partners.get(game.teammate);
+    row.games++; row.wins += Number(game.won); row.losses += Number(!game.won);
+  });
+  const rows = [...partners.values()].map(row => ({...row, winRate:row.wins / row.games}));
+  const best = rows.filter(row => row.games >= 2).sort((a,b) =>
+    b.winRate - a.winRate || b.games - a.games || b.wins - a.wins || a.name.localeCompare(b.name,'it'))[0] || null;
+  const mostFrequent = [...rows].sort((a,b) => b.games - a.games || a.name.localeCompare(b.name,'it'))[0] || null;
+  return {rows, best, mostFrequent};
+}
+
+function calculateOpponentStats(games) {
+  const opponents = new Map();
+  games.forEach(game => game.opponents.forEach(name => {
+    if (!opponents.has(name)) opponents.set(name, {name, games:0, wins:0, losses:0});
+    const row = opponents.get(name);
+    row.games++; row.wins += Number(game.won); row.losses += Number(!game.won);
+  }));
+  const rows = [...opponents.values()];
+  const nemesis = rows.filter(row => row.losses > 0).sort((a,b) =>
+    b.losses - a.losses || b.games - a.games || a.name.localeCompare(b.name,'it'))[0] || null;
+  const favoriteVictim = rows.filter(row => row.wins > 0).sort((a,b) =>
+    b.wins - a.wins || b.games - a.games || a.name.localeCompare(b.name,'it'))[0] || null;
+  return {rows, nemesis, favoriteVictim};
+}
+
+function calculatePlayerAdvancedStats(matches, playerName, seasonId, state) {
+  const games = getPlayerSeasonGames(matches, playerName, seasonId, state);
+  let rating = 1000, peakElo = 1000, streak = 0, bestWinStreak = 0;
+  let largestWin = null, largestLoss = null;
+  games.forEach(game => {
+    rating += game.delta;
+    peakElo = Math.max(peakElo, rating);
+    streak = game.won ? (streak > 0 ? streak + 1 : 1) : (streak < 0 ? streak - 1 : -1);
+    bestWinStreak = Math.max(bestWinStreak, streak);
+    // Equal gaps keep the earliest match in the immutable chronological order.
+    if (game.won && (!largestWin || game.gap > largestWin.gap)) largestWin = game;
+    if (!game.won && (!largestLoss || game.gap > largestLoss.gap)) largestLoss = game;
+  });
+  return {rating, peakElo, streak, bestWinStreak, largestWin, largestLoss,
+    partnerships:calculatePartnershipStats(games), opponents:calculateOpponentStats(games)};
+}
+
+function calculatePlayerPalmares(seasons, playerName, matches = []) {
+  const result = {monthsWon:0, podiums:0, napoleons:0, weakRings:0, wonSeasons:[]};
+  const seen = new Set();
+  seasons.forEach(season => {
+    if (season.closed !== true || seen.has(season.seasonId)) return;
+    seen.add(season.seasonId);
+    const podium = season.podium || [];
+    if (podium.some(entry => entry.player === playerName && entry.position === 1)) {
+      result.monthsWon++;
+      result.wonSeasons.push(season.seasonId);
+    }
+    if (podium.some(entry => entry.player === playerName && [1,2,3].includes(entry.position))) result.podiums++;
+    if (!matches.some(match => match.seasonId === season.seasonId) && (season.napoleon || []).includes(playerName)) result.napoleons++;
+    if ((season.weakRing || []).includes(playerName)) result.weakRings++;
+  });
+  result.napoleons += countMatchNapoleons(matches).get(playerName) || 0;
+  result.wonSeasons.sort((a,b) => b.localeCompare(a));
+  return result;
+}
+
+function appendProfileStat(container, label, value, detail = '') {
+  const item = textElement('div', '', 'profile-detail-row');
+  item.appendChild(textElement('dt', label));
+  const description = textElement('dd', value);
+  if (detail) description.appendChild(textElement('small', detail));
+  item.appendChild(description);
+  container.appendChild(item);
+}
+
+function renderPlayerAdvancedStats(stats) {
+  document.getElementById('profilePeakElo').textContent = stats.peakElo;
+  document.getElementById('profileStreak').textContent = stats.streak > 0 ? 'W' + stats.streak
+    : stats.streak < 0 ? 'L' + Math.abs(stats.streak) : '—';
+  const companions = document.getElementById('profileCompanions');
+  const records = document.getElementById('profileRecords');
+  companions.replaceChildren(); records.replaceChildren();
+  const {best, mostFrequent} = stats.partnerships;
+  const {nemesis, favoriteVictim} = stats.opponents;
+  appendProfileStat(companions, 'Miglior compagno', best?.name || 'Dati insufficienti', best
+    ? `${best.games} partite · ${best.wins} vittorie · ${(best.winRate * 100).toLocaleString('it-IT',{maximumFractionDigits:1})}%` : 'Servono almeno 2 partite insieme');
+  appendProfileStat(companions, 'Compagno più frequente', mostFrequent?.name || '—', mostFrequent
+    ? `${mostFrequent.games} ${mostFrequent.games === 1 ? 'partita insieme' : 'partite insieme'}` : 'Nessuna partita');
+  appendProfileStat(companions, 'Nemesi', nemesis?.name || '—', nemesis
+    ? `${nemesis.losses} ${nemesis.losses === 1 ? 'sconfitta' : 'sconfitte'} · ${nemesis.games} scontri` : 'Nessuna sconfitta');
+  appendProfileStat(companions, 'Vittima preferita', favoriteVictim?.name || '—', favoriteVictim
+    ? `${favoriteVictim.wins} ${favoriteVictim.wins === 1 ? 'vittoria' : 'vittorie'} · ${favoriteVictim.games} scontri` : 'Nessuna vittoria');
+  appendProfileStat(records, 'Miglior win streak', `${stats.bestWinStreak} ${stats.bestWinStreak === 1 ? 'vittoria consecutiva' : 'vittorie consecutive'}`);
+  for (const [label, game] of [['Vittoria più larga', stats.largestWin], ['Sconfitta più larga', stats.largestLoss]]) {
+    appendProfileStat(records, label, game ? `${game.scoreFor} – ${game.scoreAgainst}` : '—', game
+      ? `Scarto ${game.gap} · contro ${game.opponents.join(' + ')}` : 'Nessuna partita');
+  }
+}
+
+let playerCareerSeasons = null;
+let playerCareerError = '';
+function renderPlayerCareer() {
+  const content = document.getElementById('profileCareerContent');
+  const message = document.getElementById('profileCareerMessage');
+  content.replaceChildren();
+  message.textContent = playerCareerError;
+  if (!profilePlayerName || !playerCareerSeasons || playerCareerError) return;
+  const career = calculatePlayerPalmares(playerCareerSeasons, profilePlayerName, playerCareerMatches);
+  for (const [label, value] of [['Mesi vinti',career.monthsWon], ['Podi',career.podiums],
+    ['Napoleoni',career.napoleons], ['Anelli Deboli',career.weakRings]]) {
+    appendProfileStat(content, label, String(value));
+  }
+}
+
+// Share the closed-season query made by the lazy-closure check with the active
+// screen; a new refresh forces a server read. Player clicks make no new queries.
+let closedSeasonsSnapshot = null;
+let closedSeasonsLoading = null;
+let closedSeasonsGeneration = 0;
+function invalidateClosedSeasons() {
+  closedSeasonsSnapshot = null;
+  closedSeasonsGeneration++;
+}
+async function getClosedSeasonsSnapshot(force = false) {
+  if (closedSeasonsLoading) return closedSeasonsLoading;
+  if (!force && closedSeasonsSnapshot) return closedSeasonsSnapshot;
+  if (force) closedSeasonsSnapshot = null;
+  const generation = closedSeasonsGeneration;
+  closedSeasonsLoading = db.collection('seasons').where('closed','==',true).get({source:'server'})
+    .then(snapshot => {
+      if (generation === closedSeasonsGeneration) closedSeasonsSnapshot = snapshot;
+      return snapshot;
+    }).finally(() => { closedSeasonsLoading = null; });
+  return closedSeasonsLoading;
+}
+
+
+// Match events are independent of Elo. Legacy results without this field have none.
+function validateMatchNapoleon(match, names) {
+  const participants = [...(match.teamA || []), ...(match.teamB || [])];
+  if (!Array.isArray(names) || names.length > 4 || new Set(names).size !== names.length ||
+      !names.every(name => participants.includes(name))) throw new Error('Napoleone non valido: scegli solo i partecipanti, senza duplicati.');
+  return [...names].sort((a,b) => a.localeCompare(b,'it'));
+}
+function getMatchNapoleon(match) {
+  if (match.status !== 'completed') return [];
+  return validateMatchNapoleon(match, match.napoleon ?? []);
+}
+function sameNapoleon(left = [], right = []) {
+  return left.length === right.length && left.every(name => right.includes(name));
+}
+function countMatchNapoleons(matches) {
+  const counts = new Map(), seen = new Set();
+  matches.forEach(match => {
+    if (seen.has(match.id)) return;
+    seen.add(match.id);
+    getMatchNapoleon(match).forEach(name => counts.set(name, (counts.get(name) || 0) + 1));
+  });
+  return counts;
+}
+function getSeasonNapoleonCounts(season, matches) {
+  const monthly = matches.filter(match => match.seasonId === season.seasonId);
+  return monthly.length ? countMatchNapoleons(monthly)
+    : new Map((season.napoleon || []).map(name => [name, 1]));
+}
+function napoleonBadge(count) { return count ? ' ♛' + (count > 1 ? '×' + count : '') : ''; }
+function teamDescription(match, team) {
+  const names = getMatchNapoleon(match);
+  return team.map(name => name + napoleonBadge(Number(names.includes(name)))).join(' + ');
+}
+let resultNapoleon = [];
+function renderResultNapoleon() {
+  const container = document.getElementById('resultNapoleonPlayers');
+  container.replaceChildren();
+  [...currentMatch.teamA, ...currentMatch.teamB].forEach(name => {
+    const button = textElement('button', name, 'napoleon-player-button');
+    button.type = 'button'; button.disabled = isClosingMatch;
+    button.setAttribute('aria-pressed', String(resultNapoleon.includes(name)));
+    button.addEventListener('click', () => {
+      if (isClosingMatch) return;
+      resultNapoleon = validateMatchNapoleon(currentMatch, resultNapoleon.includes(name)
+        ? resultNapoleon.filter(item => item !== name) : [...resultNapoleon, name]);
+      renderResultNapoleon(); updateResultPreview();
+    });
+    container.appendChild(button);
+  });
+}
+function getRecentForm(matches, playerName) {
+  return matches.filter(match => match.status === 'completed' &&
+    [...match.teamA, ...match.teamB].includes(playerName)).sort(compareMatchChronology)
+    .slice(-5).map(match => (match.teamA.includes(playerName) ? match.scoreA > match.scoreB : match.scoreB > match.scoreA) ? 'W' : 'L');
+}
+function renderRecentForm(container, form) {
+  container.replaceChildren();
+  container.setAttribute('aria-label', 'Ultime 5 partite, dalla meno recente');
+  if (!form.length) container.appendChild(textElement('span', '—'));
+  form.forEach(outcome => container.appendChild(textElement('span', outcome, 'form-mark form-' + outcome.toLowerCase())));
+}
+async function loadAllMatches() {
+  return snapshotMatches(await db.collection('matches').get({source:'server'}));
+}
+let playerCareerMatches = [];
+
+function getPossibleTeamSplits(names) {
+  if (names.length !== 4 || new Set(names).size !== 4) throw new Error('Servono quattro giocatori distinti.');
+  const [a,b,c,d] = names;
+  return [{teamA:[a,b],teamB:[c,d]}, {teamA:[a,c],teamB:[b,d]}, {teamA:[a,d],teamB:[b,c]}];
+}
+function scoreTeamSplit(split, history) {
+  const players = [...split.teamA, ...split.teamB];
+  const recent = history.filter(match => ['completed','in_progress'].includes(match.status))
+    .slice().sort((a,b) => -compareMatchChronology(a,b));
+  const latestTogether = recent.find(match => [...match.teamA,...match.teamB].length === 4 &&
+    [...match.teamA,...match.teamB].every(name => players.includes(name)));
+  let penalty = latestTogether && isSameDraw(split, latestTogether) ? 100 : 0;
+  for (const team of [split.teamA, split.teamB]) {
+    team.forEach((name,index) => {
+      const previous = recent.find(match => [...match.teamA,...match.teamB].includes(name));
+      if (previous) {
+        const previousTeam = previous.teamA.includes(name) ? previous.teamA : previous.teamB;
+        if (previousTeam.includes(team[1-index])) penalty += 10;
+      }
+    });
+  }
+  return penalty;
+}
+function chooseBalancedRandomSplit(names, history = [], randomInt = secureRandomInt) {
+  const candidates = getPossibleTeamSplits(names).map(split => ({split, penalty:scoreTeamSplit(split,history)}));
+  const minimum = Math.min(...candidates.map(item => item.penalty));
+  const best = candidates.filter(item => item.penalty === minimum);
+  return best[randomInt(best.length)].split;
+}
+let isDrawing = false;
+async function drawSelectedPlayers(selected) {
+  if (isDrawing || isCreatingMatch) return;
+  isDrawing = true;
+  [drawButton,redrawButton,startMatchButton,cancelDrawButton].forEach(button => button.disabled = true);
+  updateNavigationLock();
+  try {
+    let history = [];
+    try {
+      history = snapshotMatches(await db.collection('matches').where('seasonId','==',getSeasonId()).get({source:'server'}));
+    } catch (error) { console.error('Storico sorteggio non disponibile: sorteggio casuale.', error); }
+    currentDraw = generateDraw(selected, history);
+    showDraw(currentDraw);
+  } finally {
+    isDrawing = false;
+    [drawButton,redrawButton,startMatchButton,cancelDrawButton].forEach(button => button.disabled = false);
+    updateNavigationLock();
+  }
+}
+let historyMatches = [];
+let historyFilter = 'all';
+function filterHistoryMatches(matches, filter, player) {
+  if (filter === 'all') return matches;
+  if (!player) return [];
+  return matches.filter(match => {
+    const inA = match.teamA.includes(player), inB = match.teamB.includes(player);
+    if (!inA && !inB) return false;
+    if (filter === 'mine') return true;
+    if (match.status !== 'completed') return false;
+    const won = inA ? match.scoreA > match.scoreB : match.scoreB > match.scoreA;
+    return filter === 'wins' ? won : filter === 'losses' ? !won : false;
+  });
+}
+function renderHistory() {
+  const player = localStorage.getItem('rankingScopaPlayer');
+  if (!player) historyFilter = 'all';
+  const filters = document.getElementById('historyFilters');
+  filters.replaceChildren();
+  for (const [filter,label] of [['all','TUTTE'],['mine','MIE PARTITE'],['wins','VITTORIE'],['losses','SCONFITTE']]) {
+    const button = textElement('button',label,'history-filter');
+    button.type = 'button'; button.disabled = filter !== 'all' && !player;
+    button.setAttribute('aria-pressed',String(historyFilter === filter));
+    button.addEventListener('click',() => { historyFilter = filter; renderHistory(); });
+    filters.appendChild(button);
+  }
+  renderMatches(document.getElementById('historyList'), filterHistoryMatches(historyMatches,historyFilter,player), 'Nessuna partita per questo filtro.');
+}
+function matchDate(match) {
+  return match.createdAt?.toDate?.().toLocaleString('it-IT', {timeZone:'Europe/Rome',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) || match.seasonId;
+}
+function renderMatchMetadata(match) {
+  const container = document.getElementById('matchDetails');
+  container.replaceChildren();
+  appendProfileStat(container,'Data',matchDate(match));
+  appendProfileStat(container,'Creatore',match.createdByPlayer || 'Non disponibile');
+  if (match.status !== 'completed') return;
+  appendProfileStat(container,'Vincitori',(match.scoreA > match.scoreB ? match.teamA : match.teamB).join(' + '));
+  appendProfileStat(container,'Napoleone',getMatchNapoleon(match).join(' · ') || '—');
+  appendProfileStat(container,'Risultato inserito da',match.completedByPlayer || 'Non disponibile');
+  appendProfileStat(container,'Correzioni',String(match.correctionCount || 0));
+  if (match.previousResult) appendProfileStat(container,'Risultato precedente',
+    `${match.previousResult.scoreA} – ${match.previousResult.scoreB}`,
+    'Napoleone: ' + ((match.previousResult.napoleon || []).join(' · ') || '—'));
+}

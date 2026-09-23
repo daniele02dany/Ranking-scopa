@@ -461,3 +461,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f3d57a; outline-
 .season-archive-award { margin-top: 14px; padding: 16px; border-left: 2px solid #81263b; background: #2d101850; border-radius: 0 10px 10px 0; }
 .season-archive-award h4 { color: #d7c8ab; font-size: 11px; letter-spacing: 2px; }
 .season-archive-award p { margin-top: 8px; line-height: 1.5; }
+
+.danger-button { border-color: #a3455b; color: #ffc4d0; background: #33121c; }
+.season-lifecycle-message { max-width: 520px; margin: 0 auto; padding: 14px 24px; color: #d7c8ab; background: #221a10; font-size: 13px; line-height: 1.6; }
+.season-lifecycle-message:empty { display: none; }
+.weak-ring-award { border-left-color: #87785c; background: #302c2350; }

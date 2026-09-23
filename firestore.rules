@@ -2,9 +2,44 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isSeasonAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.enabled == true;
+    }
+    function validSeasonId(id) {
+      return id is string && id.matches('^[0-9]{4}-(0[1-9]|1[0-2])$');
+    }
+    // Europe/Rome at the FIRST day of a month: April-October UTC+2, else UTC+1.
+    // No browser clock is trusted; all permissions use request.time.
+    function monthStart(year, month) {
+      return timestamp.date(year, month, 1)
+        - duration.value(month >= 4 && month <= 10 ? 2 : 1, 'h');
+    }
+    function seasonStart(id) {
+      return monthStart(int(id.split('-')[0]), int(id.split('-')[1]));
+    }
+    function seasonEnd(id) {
+      let year = int(id.split('-')[0]);
+      let month = int(id.split('-')[1]);
+      return monthStart(month == 12 ? year + 1 : year, month == 12 ? 1 : month + 1);
+    }
+    function openCurrentSeason(id) {
+      return validSeasonId(id) && request.time >= seasonStart(id) && request.time < seasonEnd(id)
+        && (!exists(/databases/$(database)/documents/seasons/$(id))
+          || get(/databases/$(database)/documents/seasons/$(id)).data.get('closed', false) != true);
+    }
+    function validName(value) { return value is string && value.trim().size() > 0 && value.size() <= 200; }
+
+    match /admins/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+
     match /players/{playerId} {
       allow read: if true;
-      allow create, update: if request.auth != null;
+      allow create, update: if signedIn();
       allow delete: if false;
     }
 
@@ -15,58 +50,45 @@ service cloud.firestore {
             'seasonId', 'teamA', 'teamB', 'excluded',
             'createdByPlayer', 'createdByUid', 'createdAt', 'status'
           ])
-          && data.seasonId is string
-          && data.seasonId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+          && openCurrentSeason(data.seasonId)
           && data.teamA is list && data.teamA.size() == 2
-          && data.teamA[0] is string && data.teamA[1] is string
+          && validName(data.teamA[0]) && validName(data.teamA[1])
           && data.teamB is list && data.teamB.size() == 2
-          && data.teamB[0] is string && data.teamB[1] is string
+          && validName(data.teamB[0]) && validName(data.teamB[1])
           && data.excluded is list
-          && data.teamA.concat(data.teamB).concat(data.excluded).toSet().size()
-              == 4 + data.excluded.size()
-          && data.createdByPlayer is string
-          && data.createdByPlayer.size() > 0
+          && data.teamA.concat(data.teamB).concat(data.excluded).toSet().size() == 4 + data.excluded.size()
+          && validName(data.createdByPlayer)
           && data.createdByUid == request.auth.uid
           && data.createdAt == request.time
           && data.status == 'in_progress';
       }
-
       function validScore() {
         let data = request.resource.data;
-        let gap = data.scoreA > data.scoreB
-          ? data.scoreA - data.scoreB : data.scoreB - data.scoreA;
         return data.status == 'completed'
-          && data.scoreA is int && data.scoreA >= 0
-          && data.scoreB is int && data.scoreB >= 0
-          // Precisione intera JavaScript: nessun tetto sportivo ai punti.
-          && data.scoreA <= 9007199254740991
-          && data.scoreB <= 9007199254740991
+          && data.scoreA is int && data.scoreA >= 0 && data.scoreA <= 9007199254740991
+          && data.scoreB is int && data.scoreB >= 0 && data.scoreB <= 9007199254740991
           && data.scoreA != data.scoreB
-          && (data.scoreA >= 21 || data.scoreB >= 21)
-          && data.winnerTeam == (data.scoreA > data.scoreB ? 'A' : 'B')
-          && data.ratingDelta is int
-          && data.ratingDelta == 20 + gap
-          && data.ratingDelta <= 9007199254740991;
+          && data.winnerTeam == (data.scoreA > data.scoreB ? 'A' : 'B');
       }
-
+      function validRevision() {
+        return request.resource.data.matchRevision is int
+          && request.resource.data.matchRevision == resource.data.get('matchRevision', 0) + 1;
+      }
       function validCompletion() {
         let data = request.resource.data;
         return resource.data.status == 'in_progress'
           && data.diff(resource.data).affectedKeys().hasOnly([
-            'status', 'scoreA', 'scoreB', 'winnerTeam', 'ratingDelta',
-            'completedAt', 'completedByUid'
+            'status', 'scoreA', 'scoreB', 'winnerTeam', 'matchRevision', 'completedAt', 'completedByUid'
           ])
           && validScore()
-          && data.completedByUid == request.auth.uid
-          && data.completedAt == request.time;
+          && data.completedByUid == request.auth.uid && data.completedAt == request.time;
       }
-
       function validCorrection() {
         let data = request.resource.data;
         let previous = resource.data;
         return previous.status == 'completed'
           && data.diff(previous).affectedKeys().hasOnly([
-            'scoreA', 'scoreB', 'winnerTeam', 'ratingDelta',
+            'scoreA', 'scoreB', 'winnerTeam', 'matchRevision',
             'correctionCount', 'previousResult', 'correctedAt', 'correctedByUid'
           ])
           && validScore()
@@ -74,20 +96,134 @@ service cloud.firestore {
           && data.correctionCount is int
           && data.correctionCount == previous.get('correctionCount', 0) + 1
           && data.previousResult == {
-            'scoreA': previous.scoreA,
-            'scoreB': previous.scoreB,
-            'winnerTeam': previous.winnerTeam,
-            'ratingDelta': previous.ratingDelta
+            'scoreA': previous.scoreA, 'scoreB': previous.scoreB, 'winnerTeam': previous.winnerTeam
           }
-          && data.correctedByUid == request.auth.uid
-          && data.correctedAt == request.time;
+          && data.correctedByUid == request.auth.uid && data.correctedAt == request.time;
       }
+      function validCancellation() {
+        let data = request.resource.data;
+        let resultFields = [
+          'scoreA', 'scoreB', 'winnerTeam', 'completedAt', 'completedByUid',
+          'correctionCount', 'previousResult', 'correctedAt', 'correctedByUid', 'ratingDelta'
+        ];
+        return resource.data.status == 'completed' && data.status == 'in_progress'
+          && data.diff(resource.data).affectedKeys().hasOnly(resultFields.concat(['status', 'matchRevision']))
+          && !data.keys().hasAny(resultFields);
+      }
+      allow read: if signedIn();
+      allow create: if signedIn() && validNewMatch();
+      allow update: if signedIn() && openCurrentSeason(resource.data.seasonId) && validRevision()
+        && (validCompletion() || validCorrection() || validCancellation());
+      allow delete: if false;
+    }
 
-      allow read: if request.auth != null;
-      allow create: if request.auth != null && validNewMatch();
-      allow update: if request.auth != null
-        && resource.data.createdByUid == request.auth.uid
-        && (validCompletion() || validCorrection());
+    match /seasons/{seasonId} {
+      // Rules cannot iterate arbitrary lists. Validate up to 32 entries explicitly;
+      // this covers all tied players in the current roster, without truncation.
+      function validPodiumItem(items, index) {
+        return items.size() <= index || (items[index] is map
+          && items[index].keys().hasAll(['position', 'player'])
+          && items[index].keys().hasOnly(['position', 'player'])
+          && items[index].position is int && items[index].position >= 1 && items[index].position <= 3
+          && validName(items[index].player));
+      }
+      function validPodium(items) {
+        return items is list && items.size() <= 32
+          && (items.size() == 0 || items[0].position == 1)
+          && items.toSet().size() == items.size()
+          && validPodiumItem(items, 0)
+          && validPodiumItem(items, 1)
+          && validPodiumItem(items, 2)
+          && validPodiumItem(items, 3)
+          && validPodiumItem(items, 4)
+          && validPodiumItem(items, 5)
+          && validPodiumItem(items, 6)
+          && validPodiumItem(items, 7)
+          && validPodiumItem(items, 8)
+          && validPodiumItem(items, 9)
+          && validPodiumItem(items, 10)
+          && validPodiumItem(items, 11)
+          && validPodiumItem(items, 12)
+          && validPodiumItem(items, 13)
+          && validPodiumItem(items, 14)
+          && validPodiumItem(items, 15)
+          && validPodiumItem(items, 16)
+          && validPodiumItem(items, 17)
+          && validPodiumItem(items, 18)
+          && validPodiumItem(items, 19)
+          && validPodiumItem(items, 20)
+          && validPodiumItem(items, 21)
+          && validPodiumItem(items, 22)
+          && validPodiumItem(items, 23)
+          && validPodiumItem(items, 24)
+          && validPodiumItem(items, 25)
+          && validPodiumItem(items, 26)
+          && validPodiumItem(items, 27)
+          && validPodiumItem(items, 28)
+          && validPodiumItem(items, 29)
+          && validPodiumItem(items, 30)
+          && validPodiumItem(items, 31);
+      }
+      function validAwardItem(items, index) {
+        return items.size() <= index || validName(items[index]);
+      }
+      function validAwards(items) {
+        return items is list && items.size() <= 32 && items.toSet().size() == items.size()
+          && validAwardItem(items, 0)
+          && validAwardItem(items, 1)
+          && validAwardItem(items, 2)
+          && validAwardItem(items, 3)
+          && validAwardItem(items, 4)
+          && validAwardItem(items, 5)
+          && validAwardItem(items, 6)
+          && validAwardItem(items, 7)
+          && validAwardItem(items, 8)
+          && validAwardItem(items, 9)
+          && validAwardItem(items, 10)
+          && validAwardItem(items, 11)
+          && validAwardItem(items, 12)
+          && validAwardItem(items, 13)
+          && validAwardItem(items, 14)
+          && validAwardItem(items, 15)
+          && validAwardItem(items, 16)
+          && validAwardItem(items, 17)
+          && validAwardItem(items, 18)
+          && validAwardItem(items, 19)
+          && validAwardItem(items, 20)
+          && validAwardItem(items, 21)
+          && validAwardItem(items, 22)
+          && validAwardItem(items, 23)
+          && validAwardItem(items, 24)
+          && validAwardItem(items, 25)
+          && validAwardItem(items, 26)
+          && validAwardItem(items, 27)
+          && validAwardItem(items, 28)
+          && validAwardItem(items, 29)
+          && validAwardItem(items, 30)
+          && validAwardItem(items, 31);
+      }
+      function validClosure() {
+        let data = request.resource.data;
+        return validSeasonId(seasonId) && request.time >= seasonEnd(seasonId)
+          && data.keys().hasAll(['seasonId','year','month','name','closed','closedAt','podium','napoleon','weakRing'])
+          && data.seasonId == seasonId
+          && data.year is int && data.year == int(seasonId.split('-')[0])
+          && data.month is int && data.month == int(seasonId.split('-')[1])
+          && data.name is string && data.name.size() <= 200
+          && data.closed == true && data.closedAt == request.time
+          && validPodium(data.podium) && validAwards(data.napoleon) && validAwards(data.weakRing);
+      }
+      allow read: if signedIn();
+      allow create: if isSeasonAdmin() && validClosure()
+        && request.resource.data.keys().hasOnly(['seasonId','year','month','name','closed','closedAt','podium','napoleon','weakRing'])
+        && request.resource.data.name == '' && request.resource.data.napoleon.size() == 0;
+      // Only finalization of a Console-created draft is allowed. Preserve awards/name.
+      allow update: if isSeasonAdmin() && resource.data.get('closed', false) == false && validClosure()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'seasonId','year','month','name','closed','closedAt','podium','napoleon','weakRing'
+        ])
+        && request.resource.data.name == resource.data.get('name', '')
+        && request.resource.data.napoleon == resource.data.get('napoleon', []);
       allow delete: if false;
     }
   }

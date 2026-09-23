@@ -153,10 +153,22 @@ function pauseResultForm() {
   } : null;
 }
 
-function resumeResultForm() {
+async function resumeResultForm() {
   if (!pausedResult || isCreatingMatch || isClosingMatch) return;
   const draft = pausedResult;
-  if (draft.match.createdByUid !== auth.currentUser?.uid) return;
+  if (!auth.currentUser) return;
+  try {
+    const season = await db.collection('seasons').doc(draft.match.seasonId).get({source:'server'});
+    if (pausedResult !== draft || isClosingMatch || isCreatingMatch) return;
+    if (draft.match.seasonId !== getSeasonId() || (season.exists && season.data().closed === true)) {
+      document.getElementById('seasonLifecycleMessage').textContent = 'Il risultato sospeso appartiene a un mese chiuso o precedente: non può essere salvato.';
+      return;
+    }
+    matchAccess = {id:draft.match.id, editable:true};
+  } catch (error) {
+    document.getElementById('seasonLifecycleMessage').textContent = 'Impossibile riprendere il risultato. Verifica la connessione e riprova.';
+    return;
+  }
   pausedResult = null;
   currentMatch = draft.match;
   openResultForm(draft.mode);
@@ -168,28 +180,29 @@ function resumeResultForm() {
 
 function navigateTo(destination) {
   if (isCreatingMatch || isClosingMatch || !auth.currentUser || !localStorage.getItem('rankingScopaPlayer')) return;
+  syncCurrentSeason();
   pauseResultForm();
   if (destination === 'home') {
     showScreen(homeScreen);
     refreshHome();
   } else if (destination === 'play') {
-    if (pausedResult) { resumeResultForm(); return; }
+    if (pausedResult && pausedResult.match.seasonId === getSeasonId()) { resumeResultForm(); return; }
     if (currentDraw) { showDraw(currentDraw); return; }
     if (!matchPlayerList.childElementCount) createMatchPlayerList();
     showScreen(newMatchScreen);
   } else if (destination === 'ranking') {
-    if (!rankingMonth.value) rankingMonth.value = getSeasonId();
+    rankingMonth.value = getSeasonId();
     showScreen(document.getElementById('rankingScreen'));
     refreshRanking();
   } else if (destination === 'history') {
-    if (!historyMonth.value) historyMonth.value = getSeasonId();
+    historyMonth.value = getSeasonId();
     showScreen(document.getElementById('historyScreen'));
     refreshHistory();
   } else if (destination === 'hallOfFame') {
     showScreen(document.getElementById('hallOfFameScreen'));
     refreshHallOfFame();
   } else if (destination === 'players') {
-    if (!playersMonth.value) playersMonth.value = getSeasonId();
+    playersMonth.value = getSeasonId();
     showScreen(document.getElementById('playersScreen'));
     refreshPlayers();
   }
@@ -519,7 +532,8 @@ cancelDrawButton.addEventListener(
   }
 );
 function getSeasonId(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  const parts = new Intl.DateTimeFormat('en-GB', {timeZone:'Europe/Rome', year:'numeric', month:'2-digit'}).formatToParts(date);
+  return parts.find(part => part.type === 'year').value + '-' + parts.find(part => part.type === 'month').value;
 }
 
 async function startMatch() {
@@ -557,7 +571,11 @@ async function startMatch() {
   };
 
   try {
-    const reference = await db.collection("matches").add(match);
+    const reference = db.collection('matches').doc();
+    await db.runTransaction(async transaction => {
+      await assertMatchEditable(transaction, match);
+      transaction.set(reference, match);
+    });
     currentMatch = { ...match, id: reference.id };
     previousDraw = currentDraw;
     currentDraw = null;
@@ -578,7 +596,7 @@ async function startMatch() {
 
 startMatchButton.addEventListener("click", startMatch);
 function openResultForm(mode) {
-  if (isClosingMatch || !currentMatch || currentMatch.createdByUid !== auth.currentUser?.uid) return;
+  if (isClosingMatch || !canManageMatch(currentMatch)) return;
   if (pausedResult) {
     if (pausedResult.match.id === currentMatch.id && pausedResult.mode === mode) resumeResultForm();
     else document.getElementById('activeMatchNotice').textContent = 'Hai un risultato non salvato per un’altra partita. Premi RIPRENDI nella barra in basso e confermalo oppure torna alla partita per annullare il modulo.';
@@ -591,8 +609,9 @@ function openResultForm(mode) {
     id: currentMatch.id,
     scoreA: currentMatch.scoreA,
     scoreB: currentMatch.scoreB,
-    correctionCount: currentMatch.correctionCount || 0
-  } : null;
+    correctionCount: currentMatch.correctionCount || 0,
+    matchRevision: currentMatch.matchRevision || 0
+  } : {id:currentMatch.id, matchRevision:currentMatch.matchRevision || 0};
   resultForm.reset();
   if (correcting) {
     scoreAInput.value = currentMatch.scoreA;
@@ -662,7 +681,7 @@ function updateResultPreview() {
       }
       resultPreview.textContent += ' La correzione ricalcola anche tutte le partite successive del mese.';
     }
-    confirmResultButton.disabled = isClosingMatch;
+    confirmResultButton.disabled = isClosingMatch || !canManageMatch(currentMatch);
   } catch (error) {
     resultPreview.textContent = error.message;
     confirmResultButton.disabled = true;
@@ -670,37 +689,47 @@ function updateResultPreview() {
 }
 
 let matchDetailRequest = 0;
-function openMatch(match) {
-  const request = ++matchDetailRequest;
-  currentMatch = match;
+function paintMatchDetail(match) {
   activeTeamAPlayers.textContent = match.teamA.join(' + ');
   activeTeamBPlayers.textContent = match.teamB.join(' + ');
   activeExcludedPlayers.textContent = match.excluded.join(', ') || 'Nessuno';
-  activeMatchSeason.textContent = `STAGIONE ${match.seasonId}`;
+  activeMatchSeason.textContent = 'STAGIONE ' + match.seasonId;
   const completed = match.status === 'completed';
+  const editable = canManageMatch(match);
   document.getElementById('activeMatchTitle').textContent = completed ? 'PARTITA CONCLUSA' : 'PARTITA IN CORSO';
-  document.getElementById('activeMatchScore').textContent = completed ? `${match.scoreA} – ${match.scoreB}` : '';
-  enterResultButton.hidden = completed || match.createdByUid !== auth.currentUser?.uid;
-  correctResultButton.hidden = !completed || match.createdByUid !== auth.currentUser?.uid;
-  document.getElementById('activeMatchNotice').textContent = '';
-  document.getElementById('correctionInfo').textContent = completed && match.correctionCount
-    ? `Risultato corretto ${match.correctionCount} ${match.correctionCount === 1 ? 'volta' : 'volte'}. Prima dell’ultima correzione: ${match.previousResult.scoreA} – ${match.previousResult.scoreB}.`
-    : '';
-  resultMessage.textContent = completed ? resultDescription(match) :
-    match.createdByUid !== auth.currentUser?.uid ? 'Il risultato va inserito dal dispositivo che ha creato la partita.' : '';
+  document.getElementById('activeMatchScore').textContent = completed ? match.scoreA + ' – ' + match.scoreB : '';
+  enterResultButton.hidden = completed || !editable;
+  correctResultButton.hidden = !completed || !editable;
+  document.getElementById('cancelMatchResultButton').hidden = !completed || !editable;
+  document.getElementById('correctionInfo').textContent = completed && match.correctionCount && match.previousResult
+    ? 'Risultato corretto ' + match.correctionCount + ' volte. Prima: ' + match.previousResult.scoreA + ' – ' + match.previousResult.scoreB + '.' : '';
+  resultMessage.textContent = completed ? resultDescription(match) : '';
+  updateNavigationState();
+}
+
+async function openMatch(match) {
+  const request = ++matchDetailRequest;
+  currentMatch = match;
+  matchAccess = {id:match.id, editable:false};
+  paintMatchDetail(match);
+  document.getElementById('activeMatchNotice').textContent = 'Verifica della partita e della stagione…';
   showScreen(matchInProgressScreen);
-  if (completed) {
-    resultMessage.textContent = 'Ricalcolo Elo del mese…';
-    loadSeasonMatches(match.seasonId).then(matches => {
-      if (request !== matchDetailRequest || currentMatch?.id !== match.id) return;
-      const latest = matches.find(item => item.id === match.id);
-      if (!latest) throw new Error('Partita non trovata');
-      currentMatch = latest;
-      resultMessage.textContent = resultDescription(latest);
-      document.getElementById('activeMatchScore').textContent = latest.scoreA + ' – ' + latest.scoreB;
-    }).catch(() => {
-      if (request === matchDetailRequest) resultMessage.textContent = 'Impossibile ricalcolare l’Elo. Riapri la partita quando la connessione è disponibile.';
-    });
+  try {
+    const [matches, season] = await Promise.all([
+      loadSeasonMatches(match.seasonId),
+      db.collection('seasons').doc(match.seasonId).get({source:'server'})
+    ]);
+    if (request !== matchDetailRequest || currentMatch?.id !== match.id || !matchInProgressScreen.classList.contains('active')) return;
+    const latest = matches.find(item => item.id === match.id);
+    if (!latest) throw new Error('Partita non trovata.');
+    currentMatch = latest;
+    matchAccess = {id:latest.id, editable:!(season.exists && season.data().closed === true)};
+    paintMatchDetail(latest);
+    document.getElementById('activeMatchNotice').textContent = canManageMatch(latest) ? '' :
+      'Stagione chiusa o mese precedente: partita in sola lettura.';
+  } catch (error) {
+    if (request === matchDetailRequest) document.getElementById('activeMatchNotice').textContent =
+      'Impossibile verificare la partita. Riaprila quando la connessione è disponibile; nessuna modifica è abilitata.';
   }
 }
 
@@ -710,8 +739,8 @@ async function closeMatch(event) {
   let result;
   try { result = readResult(); } catch (error) { resultSaveMessage.textContent = error.message; return; }
   const user = auth.currentUser;
-  if (!user || currentMatch.createdByUid !== user.uid) {
-    resultSaveMessage.textContent = 'Usa il dispositivo che ha creato la partita per salvare il risultato.';
+  if (!user || currentMatch.seasonId !== getSeasonId()) {
+    resultSaveMessage.textContent = 'Puoi salvare soltanto risultati del mese corrente e di una stagione aperta.';
     return;
   }
   const matchId = currentMatch.id;
@@ -732,7 +761,7 @@ async function closeMatch(event) {
       const snapshot = await transaction.get(reference);
       if (!snapshot.exists) throw new Error('La partita non esiste più.');
       const match = snapshot.data();
-      if (match.createdByUid !== user.uid) throw new Error('Non puoi modificare questa partita.');
+      await assertMatchEditable(transaction, match);
       if (correcting) {
         if (match.status !== 'completed') throw new Error('La partita non risulta conclusa. Riaprila dalla Home.');
         const latest = { ...match, id: matchId };
@@ -741,11 +770,13 @@ async function closeMatch(event) {
           return { match: latest, outcome: 'unchanged' };
         }
         if (match.scoreA !== expected.scoreA || match.scoreB !== expected.scoreB ||
-            (match.correctionCount || 0) !== expected.correctionCount) {
+            (match.correctionCount || 0) !== expected.correctionCount ||
+            (match.matchRevision || 0) !== expected.matchRevision) {
           return { match: latest, outcome: 'conflict' };
         }
         const update = {
           ...result,
+          matchRevision: (match.matchRevision || 0) + 1,
           correctionCount: (match.correctionCount || 0) + 1,
           previousResult: {
             scoreA: match.scoreA,
@@ -760,21 +791,24 @@ async function closeMatch(event) {
       }
       // La lettura nella transazione impedisce due chiusure anche da schede diverse.
       if (match.status === 'completed') return { match: { ...match, id: matchId }, outcome: 'unchanged' };
-      if (match.status !== 'in_progress' || match.createdByUid !== user.uid) throw new Error('Non puoi concludere questa partita.');
+      if (match.status !== 'in_progress' || (match.matchRevision || 0) !== (expected?.matchRevision || 0)) throw new Error('La partita è cambiata. Riaprila prima di salvare il risultato.');
       const update = {
         ...result,
         status: 'completed',
+        matchRevision: (match.matchRevision || 0) + 1,
         completedAt: firebase.firestore.FieldValue.serverTimestamp(),
         completedByUid: user.uid
       };
       transaction.update(reference, update);
       return { match: { ...match, ...update, id: matchId }, outcome: 'completed' };
     });
-    openMatch(saved.match);
+    playersSeasonData = null;
+    await openMatch(saved.match);
     document.getElementById('activeMatchNotice').textContent = saved.outcome === 'conflict'
       ? 'Il risultato è stato modificato da un’altra scheda mentre lo correggevi. La tua correzione non è stata salvata. Qui vedi il risultato aggiornato: controllalo e premi CORREGGI RISULTATO se serve.'
       : saved.outcome === 'corrected' ? 'Correzione salvata. Elo e storico sono ricalcolati anche per tutte le partite successive del mese.'
       : saved.outcome === 'unchanged' ? 'Questo risultato è già stato salvato. Nessuna partita è stata conteggiata due volte.' : '';
+    await Promise.all([refreshHome(), refreshRanking(), refreshHistory(), refreshPlayers()]);
   } catch (error) {
     console.error('Errore salvataggio risultato:', error);
     resultSaveMessage.textContent = error.code === 'permission-denied'
@@ -795,7 +829,7 @@ function snapshotMatches(snapshot) {
 }
 
 async function loadSeasonMatches(seasonId) {
-  const matches = snapshotMatches(await db.collection('matches').where('seasonId', '==', seasonId).get());
+  const matches = snapshotMatches(await db.collection('matches').where('seasonId', '==', seasonId).get({source:'server'}));
   const state = calculateSeasonState(matches, availablePlayers, seasonId);
   return matches.map(match => ({ ...match, elo: state.matchDeltas.get(match.id) }));
 }
@@ -913,17 +947,16 @@ function renderRanking(container, rows) {
 }
 
 async function refreshHome() {
+  await ensurePreviousSeasonsClosed();
   const request = ++homeRequest;
   const message = document.getElementById('homeDataMessage');
   const month = getSeasonId();
-  document.getElementById('homeSeason').textContent = new Date().toLocaleDateString('it-IT', {month:'long',year:'numeric'}).toUpperCase();
+  document.getElementById('homeSeason').textContent = new Date().toLocaleDateString('it-IT', {month:'long',year:'numeric',timeZone:'Europe/Rome'}).toUpperCase();
   message.textContent = 'Aggiornamento partite e classifica…';
   try {
-    const [matches, openSnapshot] = await Promise.all([
-      loadSeasonMatches(month), db.collection('matches').where('status','==','in_progress').get()
-    ]);
+    const matches = await loadSeasonMatches(month);
     if (request !== homeRequest) return;
-    renderMatches(document.getElementById('openMatches'), snapshotMatches(openSnapshot), 'Nessuna partita in corso.');
+    renderMatches(document.getElementById('openMatches'), matches.filter(match => match.status === 'in_progress'), 'Nessuna partita in corso.');
     renderMatches(recentMatchesPreview, matches.filter(match => match.status === 'completed').slice(0,3), 'Nessuna partita conclusa questo mese.');
     const podium = document.getElementById('homePodium');
     podium.replaceChildren();
@@ -946,6 +979,7 @@ async function refreshHome() {
 }
 
 async function refreshHistory() {
+  await ensurePreviousSeasonsClosed();
   const request = ++historyRequest;
   const month = historyMonth.value;
   const message = document.getElementById('historyMessage');
@@ -963,6 +997,7 @@ async function refreshHistory() {
 }
 
 async function refreshRanking() {
+  await ensurePreviousSeasonsClosed();
   const request = ++rankingRequest;
   const month = rankingMonth.value;
   const message = document.getElementById('rankingMessage');
@@ -1003,6 +1038,7 @@ let playersSeasonData = null;
 let profilePlayerName = null;
 
 async function refreshPlayers() {
+  await ensurePreviousSeasonsClosed();
   const request = ++playersRequest;
   const seasonId = playersMonth.value;
   profileMonth.value = seasonId;
@@ -1078,27 +1114,28 @@ document.getElementById('backToPlayersButton').addEventListener('click',() => na
 
 
 // Archived seasons are read-only snapshots, independent of the live Elo ranking.
-// Future admin closure may add final statistics and awards without changing this reader.
+// Archive snapshots are immutable; automatic closure is restricted to authorized admins.
 let hallOfFameRequest = 0;
 
 async function loadClosedSeasons() {
-  const snapshot = await db.collection('seasons').where('closed', '==', true).get();
+  const snapshot = await db.collection('seasons').where('closed', '==', true).get({source:'server'});
   const seasons = [];
   snapshot.forEach(doc => {
     const data = doc.data();
     if (data.closed !== true) return;
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(doc.id) || data.seasonId !== doc.id ||
         data.year !== Number(doc.id.slice(0, 4)) || data.month !== Number(doc.id.slice(5)) ||
-        !Array.isArray(data.podium) || !data.podium.length ||
-        !data.podium.some(entry => entry?.position === 1) ||
+        !Array.isArray(data.podium) ||
+        (data.podium.length > 0 && !data.podium.some(entry => entry?.position === 1)) ||
         !data.podium.every(entry => entry && Number.isInteger(entry.position) && entry.position >= 1 && entry.position <= 3 &&
           typeof entry.player === 'string' && entry.player.trim()) ||
         new Set(data.podium.map(entry => entry.player)).size !== data.podium.length ||
         !Array.isArray(data.napoleon) || !data.napoleon.every(name => typeof name === 'string' && name.trim()) ||
+        !Array.isArray(data.weakRing ?? []) || !(data.weakRing ?? []).every(name => typeof name === 'string' && name.trim()) ||
         (data.name != null && typeof data.name !== 'string')) {
       throw new Error('Dati stagione non validi: ' + doc.id);
     }
-    seasons.push({...data, podium: [...data.podium].sort((a,b) => a.position - b.position || a.player.localeCompare(b.player, 'it'))});
+    seasons.push({...data, weakRing:data.weakRing ?? [], podium: [...data.podium].sort((a,b) => a.position - b.position || a.player.localeCompare(b.player, 'it'))});
   });
   return seasons.sort((a,b) => b.seasonId.localeCompare(a.seasonId));
 }
@@ -1147,10 +1184,17 @@ function renderHallOfFame(seasons) {
       podium.appendChild(item);
     });
     card.appendChild(podium);
+    if (!season.podium.length) card.appendChild(textElement('p', 'Nessuna partita conclusa: podio non assegnato.', 'scoring-rule'));
     if (season.napoleon.length) {
       const award = textElement('div', '', 'season-archive-award');
       award.appendChild(textElement('h4', '🏅 NAPOLEONE'));
       award.appendChild(textElement('p', season.napoleon.join(' · ')));
+      card.appendChild(award);
+    }
+    if ((season.weakRing ?? []).length) {
+      const award = textElement('div', '', 'season-archive-award weak-ring-award');
+      award.appendChild(textElement('h4', '🔗 ANELLO DEBOLE'));
+      award.appendChild(textElement('p', season.weakRing.join(' · ')));
       card.appendChild(award);
     }
     list.appendChild(card);
@@ -1158,6 +1202,7 @@ function renderHallOfFame(seasons) {
 }
 
 async function refreshHallOfFame() {
+  await ensurePreviousSeasonsClosed();
   const request = ++hallOfFameRequest;
   const screen = document.getElementById('hallOfFameScreen');
   const message = document.getElementById('hallOfFameMessage');
@@ -1188,3 +1233,200 @@ function openHallOfFame() {
 document.getElementById('hallOfFameButton').addEventListener('click', openHallOfFame);
 document.getElementById('refreshHallOfFameButton').addEventListener('click', refreshHallOfFame);
 document.getElementById('backToHistoryButton').addEventListener('click', () => navigateTo('history'));
+
+
+// Calendar shared with firestore.rules: month boundaries in Europe/Rome.
+let seasonsCheckPromise = null;
+let observedSeasonId = null;
+let matchAccess = {id: null, editable: false};
+const RESULT_FIELDS = [
+  'scoreA', 'scoreB', 'winnerTeam', 'completedAt', 'completedByUid',
+  'correctionCount', 'previousResult', 'correctedAt', 'correctedByUid', 'ratingDelta'
+];
+
+function syncCurrentSeason() {
+  const seasonId = getSeasonId();
+  if (observedSeasonId !== seasonId) {
+    observedSeasonId = seasonId;
+    [historyMonth, rankingMonth, playersMonth, profileMonth].forEach(input => input.value = seasonId);
+    homeRequest++; historyRequest++; rankingRequest++; playersRequest++;
+    playersSeasonData = null;
+    // Keep drafts available for inspection; save is denied for an expired month.
+    matchAccess = {id: null, editable: false};
+  }
+  return seasonId;
+}
+
+function canManageMatch(match) {
+  return Boolean(auth.currentUser && match && match.seasonId === getSeasonId() &&
+    matchAccess.id === match.id && matchAccess.editable);
+}
+
+async function assertMatchEditable(transaction, match) {
+  if (!auth.currentUser || match.seasonId !== getSeasonId()) {
+    throw new Error('La partita appartiene a un mese precedente: è in sola lettura.');
+  }
+  const season = await transaction.get(db.collection('seasons').doc(match.seasonId));
+  if (season.exists && season.data().closed === true) throw new Error('La stagione è chiusa: il risultato non è modificabile.');
+}
+
+function calculateSeasonAwards(matches, roster, seasonId) {
+  const ranking = calculateSeasonState(matches, roster, seasonId).ranking;
+  const completedCount = matches.filter(match => match.status === 'completed' && match.seasonId === seasonId).length;
+  const podium = [];
+  let previousRating, position = 0;
+  // Same competition ranks as the monthly ranking: 1, 1, 3 (not a tie-break).
+  if (completedCount) ranking.forEach((row, index) => {
+    if (row.rating !== previousRating) position = index + 1;
+    previousRating = row.rating;
+    if (position <= 3) podium.push({position, player: row.name});
+  });
+  const eligible = ranking.filter(row => row.games >= 5);
+  const lowest = eligible.reduce((value, row) => value === null || row.rating < value ? row.rating : value, null);
+  const weakRing = eligible.filter(row => row.rating === lowest).map(row => row.name).sort((a,b) => a.localeCompare(b,'it'));
+  return {podium, weakRing};
+}
+
+async function closeSeasonAutomatically(seasonId) {
+  if (!auth.currentUser || !/^\d{4}-(0[1-9]|1[0-2])$/.test(seasonId) || seasonId >= getSeasonId()) {
+    throw new Error('Si possono archiviare soltanto mesi precedenti.');
+  }
+  const reference = db.collection('seasons').doc(seasonId);
+  const existing = await reference.get({source: 'server'});
+  if (existing.exists && existing.data().closed === true) return false;
+  // Never archive a cache-only query. Rules freeze all previous-month matches,
+  // including new inserts, so the set cannot change while the season is saved.
+  const [matchSnapshot, playerSnapshot] = await Promise.all([
+    db.collection('matches').where('seasonId', '==', seasonId).get({source:'server'}),
+    db.collection('players').where('active', '==', true).get({source:'server'})
+  ]);
+  const matches = snapshotMatches(matchSnapshot);
+  if (!matches.length) return false;
+  const roster = [];
+  playerSnapshot.forEach(doc => roster.push({...doc.data(), id:doc.id}));
+  const awards = calculateSeasonAwards(matches, roster, seasonId);
+  return db.runTransaction(async transaction => {
+    const snapshot = await transaction.get(reference);
+    if (snapshot.exists && snapshot.data().closed === true) return false;
+    const previous = snapshot.exists ? snapshot.data() : {};
+    const napoleon = previous.napoleon ?? [];
+    if (!Array.isArray(napoleon) || !napoleon.every(name => typeof name === 'string' && name.trim())) {
+      throw new Error('Assegnazione Napoleone non valida per ' + seasonId);
+    }
+    // Rules enforce the same bounded archive schema; never truncate tied winners.
+    if ([awards.podium, awards.weakRing, napoleon].some(list => list.length > 32)) {
+      throw new Error('Archivio oltre 32 nomi: occorre estendere la validazione delle regole.');
+    }
+    transaction.set(reference, {
+      seasonId, year:Number(seasonId.slice(0,4)), month:Number(seasonId.slice(5)),
+      name: previous.name ?? '', closed:true,
+      closedAt:firebase.firestore.FieldValue.serverTimestamp(),
+      podium:awards.podium, napoleon:[...napoleon], weakRing:awards.weakRing
+    }, {merge:true});
+    return true;
+  });
+}
+
+async function ensurePreviousSeasonsClosed() {
+  if (!auth.currentUser) return;
+  if (seasonsCheckPromise) return seasonsCheckPromise;
+  const month = syncCurrentSeason();
+  const message = document.getElementById('seasonLifecycleMessage');
+  seasonsCheckPromise = (async () => {
+    message.textContent = 'Controllo delle stagioni precedenti…';
+    const [matches, seasons] = await Promise.all([
+      db.collection('matches').where('seasonId', '<', month).get({source:'server'}),
+      db.collection('seasons').where('closed', '==', true).get({source:'server'})
+    ]);
+    const closed = new Set();
+    seasons.forEach(doc => closed.add(doc.id));
+    const pending = new Set();
+    matches.forEach(doc => {
+      const id = doc.data().seasonId;
+      if (/^\d{4}-(0[1-9]|1[0-2])$/.test(id) && id < month && !closed.has(id)) pending.add(id);
+    });
+    if (!pending.size) { message.textContent = ''; return; }
+    const admin = await db.collection('admins').doc(auth.currentUser.uid).get({source:'server'});
+    if (!admin.exists || admin.data().enabled !== true) {
+      message.textContent = 'Stagioni da archiviare: ' + [...pending].sort().join(', ') + '. La chiusura avverrà all’apertura da un dispositivo autorizzato. Le vecchie partite sono già in sola lettura.';
+      return;
+    }
+    for (const id of [...pending].sort()) {
+      message.textContent = 'Chiusura della stagione ' + id + '…';
+      await closeSeasonAutomatically(id);
+    }
+    message.textContent = 'Stagioni precedenti archiviate nella Hall of Fame.';
+  })().catch(error => {
+    console.error('Errore archiviazione stagioni:', error);
+    message.textContent = 'Archiviazione non completata. Verifica connessione e regole Firestore, poi premi AGGIORNA. I risultati dei mesi precedenti restano in sola lettura.';
+  }).finally(() => { seasonsCheckPromise = null; });
+  return seasonsCheckPromise;
+}
+
+async function cancelMatchResult() {
+  if (isClosingMatch || !canManageMatch(currentMatch) || currentMatch.status !== 'completed') return;
+  const expected = {...currentMatch};
+  if (!window.confirm(`Annullare il risultato ${expected.scoreA} – ${expected.scoreB}? La partita tornerà in corso e l’Elo del mese sarà ricalcolato.`)) return;
+  isClosingMatch = true;
+  updateNavigationLock();
+  [enterResultButton, correctResultButton, document.getElementById('cancelMatchResultButton')].forEach(button => button.disabled = true);
+  const notice = document.getElementById('activeMatchNotice');
+  notice.textContent = 'Annullamento del risultato…';
+  try {
+    const reference = db.collection('matches').doc(expected.id);
+    const saved = await db.runTransaction(async transaction => {
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists) throw new Error('La partita non esiste più.');
+      const match = snapshot.data();
+      await assertMatchEditable(transaction, match);
+      if (match.status !== 'completed' || (match.matchRevision || 0) !== (expected.matchRevision || 0) ||
+          match.scoreA !== expected.scoreA || match.scoreB !== expected.scoreB ||
+          (match.correctionCount || 0) !== (expected.correctionCount || 0)) {
+        throw new Error('Il risultato è cambiato su un altro dispositivo. Riapri la partita prima di annullarlo.');
+      }
+      const update = {status:'in_progress', matchRevision:(match.matchRevision || 0) + 1};
+      RESULT_FIELDS.forEach(field => { update[field] = firebase.firestore.FieldValue.delete(); });
+      transaction.update(reference, update);
+      const cleared = {...match, id:expected.id, status:'in_progress', matchRevision:update.matchRevision};
+      RESULT_FIELDS.forEach(field => delete cleared[field]);
+      return cleared;
+    });
+    if (pausedResult?.match.id === saved.id) pausedResult = null;
+    playersSeasonData = null;
+    await openMatch(saved);
+    notice.textContent = 'Risultato annullato. La partita è in corso e non contribuisce più all’Elo.';
+    // Refresh hidden views too: no old statistics remain after a local cancellation.
+    await Promise.all([refreshHome(), refreshRanking(), refreshHistory(), refreshPlayers()]);
+  } catch (error) {
+    notice.textContent = error.code === 'permission-denied'
+      ? 'Annullamento non autorizzato. Verifica che il mese sia aperto e che le nuove regole siano pubblicate.'
+      : 'Risultato non annullato. ' + (error.code ? 'Controlla la connessione e riprova.' : error.message);
+  } finally {
+    isClosingMatch = false;
+    updateNavigationLock();
+    [enterResultButton, correctResultButton, document.getElementById('cancelMatchResultButton')].forEach(button => button.disabled = false);
+  }
+}
+
+document.getElementById('cancelMatchResultButton').addEventListener('click', cancelMatchResult);
+document.getElementById('discardResultDraftButton').addEventListener('click', () => {
+  if (isClosingMatch || isCreatingMatch || !pausedResult) return;
+  if (window.confirm('Scartare i punteggi non salvati? Nessuna partita registrata sarà modificata.')) {
+    pausedResult = null;
+    updateNavigationState();
+  }
+});
+// Recheck on returning to an app left open across a month boundary.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && auth.currentUser && !isClosingMatch && !isCreatingMatch && observedSeasonId !== getSeasonId()) {
+    const screen = document.querySelector('.screen.active')?.id;
+    syncCurrentSeason();
+    refreshHome();
+    if (screen === 'rankingScreen') refreshRanking();
+    if (screen === 'historyScreen') refreshHistory();
+    if (screen === 'playersScreen' || screen === 'playerProfileScreen') refreshPlayers();
+    if (screen === 'hallOfFameScreen') refreshHallOfFame();
+    if (screen === 'matchInProgressScreen' && currentMatch) openMatch(currentMatch);
+    if (screen === 'resultScreen') updateResultPreview();
+  }
+});

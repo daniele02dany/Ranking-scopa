@@ -8,6 +8,7 @@
 </head>
 
 <body>
+  <p id="seasonLifecycleMessage" class="season-lifecycle-message" role="status" aria-live="polite"></p>
 
   <main class="app">
 
@@ -205,6 +206,7 @@
   <p id="correctionInfo" class="correction-note"></p>
   <p id="activeMatchNotice" class="match-message" role="status" aria-live="polite"></p>
   <button id="correctResultButton" class="secondary-button" hidden>CORREGGI RISULTATO</button>
+  <button id="cancelMatchResultButton" class="secondary-button danger-button" type="button" hidden>ANNULLA RISULTATO</button>
   <button class="secondary-button" data-go-home>TORNA ALLA HOME</button>
 </section>
 
@@ -310,6 +312,7 @@
   <div id="draftResumeBar" class="draft-resume-bar" hidden>
     <span>Risultato non salvato</span>
     <button id="resumeResultButton" type="button">RIPRENDI</button>
+    <button id="discardResultDraftButton" type="button">SCARTA</button>
   </div>
   <nav id="bottomNav" class="bottom-nav" aria-label="Navigazione principale" hidden>
     <button type="button" data-nav="home">

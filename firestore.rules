@@ -8,6 +8,64 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
         && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.enabled == true;
     }
+    function isMember() {
+      return signedIn() && exists(/databases/$(database)/documents/members/$(request.auth.uid));
+    }
+    function memberPlayerId() {
+      return get(/databases/$(database)/documents/members/$(request.auth.uid)).data.playerId;
+    }
+    function isEnabledMember() {
+      return isMember()
+        && get(/databases/$(database)/documents/members/$(request.auth.uid)).data.enabled == true
+        && memberPlayerId() is string
+        && memberPlayerId().matches('^[a-z0-9-]{2,40}$')
+        && exists(/databases/$(database)/documents/players/$(memberPlayerId()));
+    }
+    function memberPlayerName() {
+      return get(/databases/$(database)/documents/players/$(memberPlayerId())).data.name;
+    }
+    function canUseApp() { return isSeasonAdmin() || isEnabledMember(); }
+    function validActor(name) {
+      return isEnabledMember() ? name == memberPlayerName() : isSeasonAdmin();
+    }
+    function canEditProfile(playerId) {
+      return isSeasonAdmin() || (isEnabledMember() && memberPlayerId() == playerId);
+    }
+
+    match /members/{uid} {
+      function validMember() {
+        let d = request.resource.data;
+        return d.keys().hasAll(['enabled','playerId','createdAt','createdByUid','updatedAt','updatedByUid'])
+          && d.keys().hasOnly(['enabled','playerId','createdAt','createdByUid','updatedAt','updatedByUid'])
+          && d.enabled is bool && d.playerId is string && d.playerId.matches('^[a-z0-9-]{2,40}$')
+          && exists(/databases/$(database)/documents/players/$(d.playerId))
+          && d.createdAt is timestamp && d.createdByUid is string
+          && d.updatedAt == request.time && d.updatedByUid == request.auth.uid;
+      }
+      allow get: if signedIn() && (uid == request.auth.uid || isSeasonAdmin());
+      allow list: if isSeasonAdmin();
+      allow create: if isSeasonAdmin() && validMember()
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.createdByUid == request.auth.uid;
+      allow update: if isSeasonAdmin() && validMember()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['enabled','updatedAt','updatedByUid']);
+      allow delete: if isSeasonAdmin();
+    }
+    match /accessRequests/{uid} {
+      allow get: if signedIn() && (uid == request.auth.uid || isSeasonAdmin());
+      allow list: if isSeasonAdmin();
+      allow create: if signedIn() && uid == request.auth.uid && !isMember() && !isSeasonAdmin()
+        && request.resource.data.keys().hasAll(['uid','requestedName','createdAt'])
+        && request.resource.data.keys().hasOnly(['uid','requestedName','createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.requestedName is string
+        && request.resource.data.requestedName == request.resource.data.requestedName.trim()
+        && request.resource.data.requestedName.size() >= 1 && request.resource.data.requestedName.size() <= 50
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if isSeasonAdmin();
+    }
+
     function validSeasonId(id) {
       return id is string && id.matches('^[0-9]{4}-(0[1-9]|1[0-2])$');
     }
@@ -76,6 +134,27 @@ service cloud.firestore {
       allow list, create, update, delete: if false;
     }
 
+    // Members authorize photos. ownerUid is optional legacy metadata, never an authority.
+    match /playerProfiles/{playerId} {
+      function validAvatar() {
+        let d = request.resource.data;
+        return playerId.matches('^[a-z0-9-]{2,40}$')
+          && exists(/databases/$(database)/documents/players/$(playerId))
+          && d.keys().hasAll(['avatarData','avatarUpdatedAt','avatarUpdatedByUid'])
+          && d.keys().hasOnly(['avatarData','avatarUpdatedAt','avatarUpdatedByUid','ownerUid'])
+          && (!d.keys().hasAny(['ownerUid']) || (d.ownerUid is string && d.ownerUid.size() > 0))
+          && d.avatarData is string && d.avatarData.size() <= 153600
+          && (d.avatarData == '' || d.avatarData.matches('^data:image/(webp|jpeg);base64,[A-Za-z0-9+/]+={0,2}$'))
+          && d.avatarUpdatedAt == request.time && d.avatarUpdatedByUid == request.auth.uid;
+      }
+      allow read: if canUseApp();
+      allow create: if canEditProfile(playerId) && validAvatar()
+        && !request.resource.data.keys().hasAny(['ownerUid']);
+      allow update: if canEditProfile(playerId) && validAvatar()
+        && request.resource.data.get('ownerUid', null) == resource.data.get('ownerUid', null);
+      allow delete: if isSeasonAdmin();
+    }
+
     match /players/{playerId} {
       function stablePlayerSchema(data) {
         return playerId.matches('^[a-z0-9-]{2,40}$')
@@ -86,7 +165,7 @@ service cloud.firestore {
           && data.createdAt is timestamp && data.updatedAt is timestamp
           && data.createdByUid is string && data.updatedByUid is string;
       }
-      allow read: if signedIn();
+      allow read: if canUseApp();
       allow create: if isSeasonAdmin() && stablePlayerSchema(request.resource.data)
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
@@ -114,7 +193,7 @@ service cloud.firestore {
           && validName(data.teamB[0]) && validName(data.teamB[1])
           && data.excluded is list
           && data.teamA.concat(data.teamB).concat(data.excluded).toSet().size() == 4 + data.excluded.size()
-          && validName(data.createdByPlayer)
+          && validName(data.createdByPlayer) && validActor(data.createdByPlayer)
           && data.createdByUid == request.auth.uid
           && data.createdAt == request.time
           && data.status == 'in_progress';
@@ -144,7 +223,7 @@ service cloud.firestore {
             'status', 'scoreA', 'scoreB', 'winnerTeam', 'matchRevision', 'completedAt', 'completedByUid', 'completedByPlayer', 'napoleon'
           ])
           && validScore() && validMatchNapoleon()
-          && validName(data.completedByPlayer)
+          && validName(data.completedByPlayer) && validActor(data.completedByPlayer)
           && data.completedByUid == request.auth.uid && data.completedAt == request.time;
       }
       function validCorrection() {
@@ -175,11 +254,11 @@ service cloud.firestore {
           && data.diff(resource.data).affectedKeys().hasOnly(resultFields.concat(['status', 'matchRevision']))
           && !data.keys().hasAny(resultFields);
       }
-      allow read: if signedIn();
-      allow create: if signedIn() && validNewMatch();
-      allow update: if signedIn() && openCurrentSeason(resource.data.seasonId) && validRevision()
+      allow read: if canUseApp();
+      allow create: if canUseApp() && validNewMatch();
+      allow update: if canUseApp() && openCurrentSeason(resource.data.seasonId) && validRevision()
         && (validCompletion() || validCorrection() || validCancellation());
-      allow delete: if false;
+      allow delete: if isSeasonAdmin() && openCurrentSeason(resource.data.seasonId);
     }
 
     match /seasons/{seasonId} {
@@ -240,7 +319,7 @@ service cloud.firestore {
           && data.closed == true && data.closedAt == request.time
           && validPodium(data.podium) && validAwards(data.napoleon) && validAwards(data.weakRing);
       }
-      allow read: if signedIn();
+      allow read: if canUseApp();
       allow create: if isSeasonAdmin() && validClosure()
         && request.resource.data.keys().hasOnly(['seasonId','year','month','name','closed','closedAt','podium','napoleon','weakRing'])
         && request.resource.data.name == '';

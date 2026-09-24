@@ -63,7 +63,8 @@ let currentMatch = null;
 
 
 function showScreen(screen) {
-  if (selectionNeedsChange && screen !== playerScreen && !(isCurrentUserAdmin() && screen.id === 'playersScreen')) screen = playerScreen;
+  if (!canUseAppClient()) screen = document.getElementById('accessScreen');
+  if (screen.id !== 'accessScreen' && selectionNeedsChange && screen !== playerScreen && !(isCurrentUserAdmin() && screen.id === 'playersScreen')) screen = playerScreen;
   document.querySelectorAll('.screen').forEach(item => item.classList.remove('active'));
   screen.classList.add("active");
   updateNavigationState(screen);
@@ -135,7 +136,7 @@ async function resumeResultForm() {
 }
 
 function navigateTo(destination) {
-  if (isDrawing || isCreatingMatch || isClosingMatch || !auth.currentUser || !localStorage.getItem('rankingScopaPlayer')) return;
+  if (isDrawing || isCreatingMatch || isClosingMatch || !auth.currentUser || !getCurrentPlayerName()) return;
   if (!ensureSelectedPlayerActive()) return;
   syncCurrentSeason();
   pauseResultForm();
@@ -162,6 +163,7 @@ function navigateTo(destination) {
     playersMonth.value = getSeasonId();
     showScreen(document.getElementById('playersScreen'));
     refreshPlayers();
+    refreshAccessManagement();
   }
 }
 
@@ -170,9 +172,11 @@ let availablePlayers = [];
 let currentDraw = null;
 
 async function createPlayerButtons() {
+  if (!canUseAppClient()) return;
   await startPlayersSubscription();
 }
 async function selectPlayer(playerName) {
+  if (!canUseAppClient() || (accessState.member?.enabled && playerName !== accessState.player?.name)) return;
   if (!auth.currentUser || !availablePlayers.some(player => player.name === playerName)) {
     document.getElementById('playerSelectionMessage').textContent = 'Scegli un giocatore attivo.';
     return;
@@ -190,32 +194,7 @@ enterButton.addEventListener("click", () => {
 });
 
 
-auth.onAuthStateChanged(async user => {
-  if (stopPlayersListener) { stopPlayersListener(); stopPlayersListener = null; }
-  rosterSubscriptionUid = null;
-  adminStatus = {uid:user?.uid || null,enabled:false,loaded:false};
-  renderPlayerManagement();
-  rosterLoaded = false;
-  if (!user) {
-    allPlayers = []; availablePlayers = []; rawPlayerDocuments = [];
-    try { await auth.signInAnonymously(); } catch (error) { console.error('Errore autenticazione:',error); }
-    return;
-  }
-  try { await loadAdminStatus(); } catch (error) { console.error('Stato admin non disponibile:',error); }
-  try {
-    await createPlayerButtons();
-    if (auth.currentUser?.uid !== user.uid) return;
-    await refreshHome();
-    const savedPlayer = localStorage.getItem('rankingScopaPlayer');
-    if (savedPlayer && availablePlayers.some(player => player.name === savedPlayer)) {
-      welcomePlayerName.textContent = savedPlayer.toUpperCase();
-      showScreen(homeScreen);
-    } else showScreen(playerScreen);
-  } catch (error) {
-    document.getElementById('playerSelectionMessage').textContent = 'Impossibile caricare il gruppo. Verifica connessione e regole, poi premi AGGIORNA.';
-    showScreen(playerScreen);
-  }
-});
+auth.onAuthStateChanged(initializeAccess);
 
 function createMatchPlayerList() {
 
@@ -240,6 +219,7 @@ function createMatchPlayerList() {
     name.textContent = player.name;
 
     label.appendChild(checkbox);
+    label.appendChild(createAvatar(player.name));
     label.appendChild(name);
 
     matchPlayerList.appendChild(label);
@@ -329,10 +309,10 @@ function showDraw(draw) {
   matchSaveMessage.textContent = "";
 
   teamAPlayers.textContent =
-    draw.teamA.join(" + ");
+    draw.teamA.join(" - ");
 
   teamBPlayers.textContent =
-    draw.teamB.join(" + ");
+    draw.teamB.join(" - ");
 
   if (draw.excluded.length > 0) {
 
@@ -349,10 +329,7 @@ function showDraw(draw) {
   showScreen(drawResultScreen);
 
 }
-redrawButton.addEventListener('click', () => {
-  if (!currentDraw || isCreatingMatch || isDrawing) return;
-  return drawSelectedPlayers([...currentDraw.teamA,...currentDraw.teamB,...currentDraw.excluded]);
-});
+redrawButton.addEventListener('click', rerollCurrentTeams);
 
 cancelDrawButton.addEventListener(
   "click",
@@ -374,7 +351,7 @@ async function startMatch() {
   if (isCreatingMatch || isDrawing || !currentDraw) return;
   matchSaveMessage.textContent = "";
   const user = auth.currentUser;
-  const playerName = localStorage.getItem("rankingScopaPlayer");
+  const playerName = getCurrentPlayerName();
   if (!user || !availablePlayers.some(player => player.name === playerName)) {
     matchSaveMessage.textContent = "Accedi e scegli un giocatore prima di iniziare la partita.";
     return;
@@ -426,7 +403,7 @@ async function startMatch() {
     isCreatingMatch = false;
     updateNavigationLock();
     [startMatchButton, redrawButton, cancelDrawButton].forEach(button => button.disabled = false);
-    startMatchButton.textContent = "♠ INIZIA PARTITA";
+    startMatchButton.textContent = "INIZIA PARTITA";
   }
 }
 
@@ -458,11 +435,11 @@ function openResultForm(mode) {
   }
   document.getElementById('resultFormTitle').textContent = correcting ? 'CORREGGI RISULTATO' : 'INSERISCI RISULTATO';
   document.getElementById('resultFormHelp').textContent = correcting
-    ? `Risultato registrato: ${currentMatch.scoreA} – ${currentMatch.scoreB}. La correzione ricalcola l’Elo di questa partita e di tutte le successive del mese.`
+    ? `Risultato registrato: ${currentMatch.scoreA} – ${currentMatch.scoreB}. Puoi aggiornare il punteggio e il Napoleone.`
     : 'Inserisci due punteggi interi non negativi, senza pareggio. Controlla squadre e punteggi prima di confermare.';
   confirmResultButton.textContent = correcting ? 'CONFERMA CORREZIONE' : 'CONFERMA RISULTATO';
-  document.getElementById('scoreTeamA').textContent = currentMatch.teamA.join(' + ');
-  document.getElementById('scoreTeamB').textContent = currentMatch.teamB.join(' + ');
+  document.getElementById('scoreTeamA').textContent = currentMatch.teamA.join(' - ');
+  document.getElementById('scoreTeamB').textContent = currentMatch.teamB.join(' - ');
   resultSaveMessage.textContent = '';
   updateResultPreview();
   showScreen(resultScreen);
@@ -502,24 +479,24 @@ function readResult() {
 }
 
 function resultDescription(match) {
-  if (!match.elo) return 'Elo non disponibile: aggiorna la partita per ricalcolarlo dal mese completo.';
+  if (!match.points) return 'Scopa Points non disponibili. Aggiorna la partita.';
   const signed = value => value > 0 ? '+' + value : String(value);
-  return [...match.teamA.map(name => name + ' ' + signed(match.elo.deltaA)),
-    ...match.teamB.map(name => name + ' ' + signed(match.elo.deltaB))].join(' · ') + ' Elo. Esclusi invariati.';
+  return [...match.teamA.map(name => name + ' ' + signed(match.points.totalDeltaA)),
+    ...match.teamB.map(name => name + ' ' + signed(match.points.totalDeltaB))].join(' · ') + ' SP';
 }
 
 function updateResultPreview() {
   try {
     const result = readResult();
     const winners = result.winnerTeam === 'A' ? currentMatch.teamA : currentMatch.teamB;
-    resultPreview.textContent = `Vince ${winners.join(' + ')}. Elo mensile · K 32: la variazione sarà ricalcolata dal registro completo dopo il salvataggio.`;
+    resultPreview.textContent = `Vince ${winners.join(' - ')}. `;
     if (resultMode === 'correction' && correctionBasis) {
       if (result.scoreA === correctionBasis.scoreA && result.scoreB === correctionBasis.scoreB && sameNapoleon(result.napoleon, correctionBasis.napoleon)) {
         resultPreview.textContent = 'Il risultato è invariato. Modifica il punteggio o il Napoleone per correggerlo.';
         confirmResultButton.disabled = true;
         return;
       }
-      resultPreview.textContent += ' La correzione ricalcola anche tutte le partite successive del mese.';
+      resultPreview.textContent += ' Controlla prima di confermare.';
     }
     confirmResultButton.disabled = isClosingMatch || !canManageMatch(currentMatch);
   } catch (error) {
@@ -530,12 +507,13 @@ function updateResultPreview() {
 
 let matchDetailRequest = 0;
 function paintMatchDetail(match) {
-  activeTeamAPlayers.textContent = teamDescription(match, match.teamA);
-  activeTeamBPlayers.textContent = teamDescription(match, match.teamB);
+  renderTeam(activeTeamAPlayers,match,match.teamA);
+  renderTeam(activeTeamBPlayers,match,match.teamB);
   activeExcludedPlayers.textContent = (match.excluded || []).join(', ') || 'Nessuno';
   activeMatchSeason.textContent = 'STAGIONE ' + match.seasonId;
   const completed = match.status === 'completed';
   const editable = canManageMatch(match);
+  document.getElementById('deleteMatchButton').hidden = !editable || !isCurrentUserAdmin();
   document.getElementById('activeMatchTitle').textContent = completed ? 'PARTITA CONCLUSA' : 'PARTITA IN CORSO';
   document.getElementById('activeMatchScore').textContent = completed ? match.scoreA + ' – ' + match.scoreB : '';
   enterResultButton.hidden = completed || !editable;
@@ -641,7 +619,7 @@ async function closeMatch(event) {
         matchRevision: (match.matchRevision || 0) + 1,
         completedAt: firebase.firestore.FieldValue.serverTimestamp(),
         completedByUid: user.uid,
-        completedByPlayer: localStorage.getItem('rankingScopaPlayer') || 'Non disponibile'
+        completedByPlayer: getCurrentPlayerName() || 'Non disponibile'
       };
       transaction.update(reference, update);
       return { match: { ...match, ...update, id: matchId }, outcome: 'completed' };
@@ -650,7 +628,7 @@ async function closeMatch(event) {
     await openMatch(saved.match);
     document.getElementById('activeMatchNotice').textContent = saved.outcome === 'conflict'
       ? 'Il risultato è stato modificato da un’altra scheda mentre lo correggevi. La tua correzione non è stata salvata. Qui vedi il risultato aggiornato: controllalo e premi CORREGGI RISULTATO se serve.'
-      : saved.outcome === 'corrected' ? 'Correzione salvata. Elo e storico sono ricalcolati anche per tutte le partite successive del mese.'
+      : saved.outcome === 'corrected' ? 'Correzione salvata. Scopa Points e storico aggiornati.'
       : saved.outcome === 'unchanged' ? 'Questo risultato è già stato salvato. Nessuna partita è stata conteggiata due volte.' : '';
     await Promise.all([refreshHome(), refreshRanking(), refreshHistory(), refreshPlayers()]);
   } catch (error) {
@@ -673,9 +651,10 @@ function snapshotMatches(snapshot) {
 }
 
 async function loadSeasonMatches(seasonId) {
+  requireAppAccess();
   const matches = snapshotMatches(await db.collection('matches').where('seasonId', '==', seasonId).get({source:'server'}));
   const state = calculateSeasonState(matches, availablePlayers, seasonId);
-  return matches.map(match => ({ ...match, elo: state.matchDeltas.get(match.id) }));
+  return matches.map(match => ({ ...match, points: state.matchDeltas.get(match.id) }));
 }
 
 function textElement(tag, text, className) {
@@ -687,25 +666,19 @@ function textElement(tag, text, className) {
 
 function renderMatches(container, matches, emptyText, compact = false) {
   container.replaceChildren();
-  if (!matches.length) container.appendChild(textElement('p', emptyText, 'empty-state'));
+  if (!matches.length) container.appendChild(textElement('p',emptyText,'empty-state'));
   matches.forEach(match => {
-    const card = textElement('button', '', compact ? 'match-summary match-compact' : 'match-summary match-card');
-    card.type = 'button';
-    card.addEventListener('click', () => openMatch(match));
-    const completed = match.status === 'completed';
-    if (compact) {
-      card.appendChild(textElement('span', teamDescription(match,match.teamA)));
-      card.appendChild(textElement('strong', match.scoreA + '–' + match.scoreB));
-      card.appendChild(textElement('span', teamDescription(match,match.teamB)));
-    } else {
-      for (const [team,score] of [[match.teamA,match.scoreA],[match.teamB,match.scoreB]]) {
-        const row = textElement('span','','match-team-row');
-        row.appendChild(textElement('span',teamDescription(match,team)));
-        row.appendChild(textElement('strong',completed ? String(score) : '—'));
-        card.appendChild(row);
-      }
-      card.appendChild(textElement('small',matchDate(match) + (completed && match.completedByPlayer ? ' · Inserito da ' + match.completedByPlayer : ''),'match-meta'));
-      if (!completed) card.appendChild(textElement('small','IN CORSO','match-meta'));
+    const card = textElement('button','','match-summary' + (compact ? ' match-compact' : ' match-card'));
+    card.type = 'button';card.addEventListener('click',() => openMatch(match));
+    const versus = textElement('span','','match-versus');
+    const left = textElement('span','','match-team'), right = textElement('span','','match-team');
+    renderTeam(left,match,match.teamA);renderTeam(right,match,match.teamB);
+    versus.appendChild(left);
+    versus.appendChild(textElement('strong',match.status === 'completed' ? match.scoreA + '–' + match.scoreB : 'VS','match-score'));
+    versus.appendChild(right);card.appendChild(versus);
+    if (!compact) {
+      card.appendChild(textElement('small',matchDate(match) + (match.status === 'completed' && match.completedByPlayer ? ' · ' + match.completedByPlayer : ''),'match-meta'));
+      if (match.status !== 'completed') card.appendChild(textElement('small','IN CORSO','correction-badge'));
       if ((match.correctionCount || 0) > 0) card.appendChild(textElement('small','CORRETTO','correction-badge'));
     }
     container.appendChild(card);
@@ -714,7 +687,7 @@ function renderMatches(container, matches, emptyText, compact = false) {
 
 
 // Fonte di verità: solo risultati completed, in ordine di creazione immutabile.
-// correctedAt e completedAt non spostano una partita nella sequenza Elo.
+// correctedAt e completedAt non spostano una partita nella sequenza Scopa Points.
 function compareMatchChronology(a, b) {
   const timestamp = match => {
     const value = match.createdAt;
@@ -727,15 +700,23 @@ function compareMatchChronology(a, b) {
   return left[0] - right[0] || left[1] - right[1] || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
+const PARTICIPATION_POINTS = 5;
+function calculateMatchDelta(scoreA, scoreB) {
+  const result = calculateResult(scoreA,scoreB);
+  const gap = Math.abs(scoreA - scoreB);
+  const matchDelta = 20 + gap * 2;
+  const deltaA = result.winnerTeam === 'A' ? matchDelta : -matchDelta;
+  return {...result,gap,matchDelta,deltaA,deltaB:-deltaA};
+}
 function calculateSeasonState(matches, roster = availablePlayers, seasonId) {
   const seasons = new Set(matches.map(match => match.seasonId));
   if (seasonId === undefined) {
-    if (seasons.size > 1) throw new Error('Seleziona una sola stagione per il calcolo Elo.');
+    if (seasons.size > 1) throw new Error('Seleziona una sola stagione per il calcolo Scopa Points.');
     seasonId = seasons.values().next().value;
   }
   const rows = new Map();
   const ensurePlayer = name => {
-    if (!rows.has(name)) rows.set(name, {name, rating: 1000, games: 0, wins: 0, losses: 0});
+    if (!rows.has(name)) rows.set(name, {name, competitivePoints:1000, participationBonus:0, scopaPoints:1000, rating:1000, gamesPlayed:0, games:0, wins:0, losses:0});
     return rows.get(name);
   };
   roster.forEach(player => ensurePlayer(player.name));
@@ -752,24 +733,20 @@ function calculateSeasonState(matches, roster = availablePlayers, seasonId) {
         ![...match.teamA, ...match.teamB].every(name => typeof name === 'string' && name.trim())) {
       throw new Error('Squadre non valide nella partita ' + match.id);
     }
-    const result = calculateResult(match.scoreA, match.scoreB);
-    const ratingA = match.teamA.reduce((sum, name) => sum + ensurePlayer(name).rating, 0) / 2;
-    const ratingB = match.teamB.reduce((sum, name) => sum + ensurePlayer(name).rating, 0) / 2;
-    const expectedA = 1 / (1 + 10 ** ((ratingB - ratingA) / 400));
-    const K = 32;
-    const actualA = result.winnerTeam === 'A' ? 1 : 0;
-    const gap = Math.abs(match.scoreA - match.scoreB);
-    const marginMultiplier = 1 + gap / 10;
-    const baseDelta = K * (actualA - expectedA);
-    const deltaA = Math.round(baseDelta * marginMultiplier);
-    const deltaB = -deltaA;
-    matchDeltas.set(match.id, {ratingA, ratingB, expectedA, gap, marginMultiplier, baseDelta, deltaA, deltaB});
+    const result = calculateMatchDelta(match.scoreA, match.scoreB);
+    const {gap, matchDelta, deltaA, deltaB} = result;
+    matchDeltas.set(match.id, {gap, matchDelta, deltaA, deltaB, participationBonus:PARTICIPATION_POINTS,
+      totalDeltaA:deltaA + PARTICIPATION_POINTS, totalDeltaB:deltaB + PARTICIPATION_POINTS});
     [['A', match.teamA, deltaA], ['B', match.teamB, deltaB]].forEach(([team, names, delta]) => {
       names.forEach(name => {
         const row = ensurePlayer(name);
         const won = team === result.winnerTeam;
-        row.rating += delta;
+        row.competitivePoints += delta;
         row.games++;
+        row.gamesPlayed = row.games;
+        row.participationBonus = row.games * PARTICIPATION_POINTS;
+        row.scopaPoints = row.competitivePoints + row.participationBonus;
+        row.rating = row.scopaPoints; // Existing consumers display/order the total.
         row.wins += Number(won);
         row.losses += Number(!won);
       });
@@ -784,44 +761,58 @@ function calculateRanking(matches, roster = availablePlayers) {
 
 function renderRanking(container, rows, matches = []) {
   const napoleon = countMatchNapoleons(matches);
-  container.replaceChildren();
-  let previousRating;
-  let position = 0;
-  rows.forEach((row, index) => {
+  container.replaceChildren();let previousRating,position = 0;
+  rows.forEach((row,index) => {
     if (row.rating !== previousRating) position = index + 1;
     previousRating = row.rating;
-    const entry = textElement('article', '', 'ranking-row');
-    entry.appendChild(textElement('strong', `${position}. ${row.name}${napoleonBadge(napoleon.get(row.name))}`));
-    entry.appendChild(textElement('strong', `${row.rating} Elo`, 'rating-value'));
-    entry.appendChild(textElement('small', `${row.games} ${row.games === 1 ? 'partita' : 'partite'} · ${row.wins}-${row.losses} W-L`));
-    const form = textElement('span','','recent-form');
-    renderRecentForm(form,getRecentForm(matches,row.name));
-    entry.appendChild(form);
+    const entry = textElement('article','','ranking-row');
+    entry.appendChild(textElement('span',String(position),'rank-number'));
+    const person = textElement('div','','ranking-person');person.appendChild(createAvatar(row.name));
+    const identity = textElement('div','');identity.appendChild(playerIdentity(row.name,napoleon.get(row.name)));
+    identity.appendChild(textElement('small',row.games ? row.games + (row.games === 1 ? ' partita' : ' partite') + ' · ' + row.wins + 'W - ' + row.losses + 'L' : 'Nessuna partita giocata'));person.appendChild(identity);entry.appendChild(person);
+    const points = textElement('div','','points-block');points.appendChild(textElement('strong',String(row.rating)));
+    points.appendChild(textElement('small','SP'));points.setAttribute('aria-label',row.rating + ' Scopa Points');entry.appendChild(points);
+    entry.appendChild(createWinRate(row));
+    if (row.games) entry.appendChild(textElement('small','Bonus +' + row.participationBonus + ' SP','participation-bonus'));
+    const streakBadge = createWinStreakBadge(calculatePlayerAdvancedStats(matches,row.name,matches[0]?.seasonId).streak);
+    if (streakBadge) identity.appendChild(streakBadge);
+    if (row.games) { const form = textElement('span','','recent-form');renderRecentForm(form,getRecentForm(matches,row.name));entry.appendChild(form); }
     container.appendChild(entry);
   });
 }
 
+
 async function refreshHome() {
+  if (!canUseAppClient()) return;
   await ensurePreviousSeasonsClosed();
   const request = ++homeRequest;
   const message = document.getElementById('homeDataMessage');
   const month = getSeasonId();
+  const selectedName = getCurrentPlayerName();
+  document.getElementById('homeAvatar').replaceChildren(...(selectedName ? [createAvatar(selectedName,'medium')] : []));
   document.getElementById('homeSeason').textContent = new Date().toLocaleDateString('it-IT', {month:'long',year:'numeric',timeZone:'Europe/Rome'}).toUpperCase();
+  document.getElementById('homePlayerSummary').textContent = '';
   message.textContent = 'Aggiornamento partite e classifica…';
   try {
     const matches = await loadSeasonMatches(month);
     if (request !== homeRequest) return;
-    renderMatches(document.getElementById('openMatches'), matches.filter(match => match.status === 'in_progress'), 'Nessuna partita in corso.');
+    renderMatches(document.getElementById('openMatches'), matches.filter(match => match.status === 'in_progress'), 'Nessuna partita in corso. Crea un nuovo tavolo quando siete pronti.');
     renderMatches(recentMatchesPreview, matches.filter(match => match.status === 'completed').slice(0,3), 'Nessuna partita conclusa questo mese.', true);
     const podium = document.getElementById('homePodium');
     podium.replaceChildren();
     const ranked = calculateRanking(matches).filter(row => row.games > 0);
+    const own = ranked.find(row => row.name === selectedName);
+    document.getElementById('homePlayerSummary').textContent = own
+      ? (ranked.findIndex(row => row.rating === own.rating) + 1) + '° nel mese · ' + own.rating + ' SP · ' + own.wins + 'W - ' + own.losses + 'L'
+      : 'Il tuo mese deve ancora iniziare';
     let rank = 0;
     ranked.slice(0,3).forEach((row,index) => {
       if (index === 0 || row.rating !== ranked[index - 1].rating) rank = index + 1;
-      const item = textElement('div', `${rank}°`);
-      item.appendChild(textElement('strong', row.name));
-      item.appendChild(textElement('small', `${row.rating} Elo`));
+      const item = textElement('div','');
+      item.appendChild(textElement('span',`${rank}°`,'podium-rank'));
+      item.appendChild(createAvatar(row.name));
+      item.appendChild(playerIdentity(row.name,countMatchNapoleons(matches).get(row.name)));
+      item.appendChild(textElement('small',`${row.rating} SP`));
       podium.appendChild(item);
     });
     if (!ranked.length) podium.appendChild(textElement('p','La classifica inizierà con la prima partita conclusa.','empty-state'));
@@ -834,6 +825,7 @@ async function refreshHome() {
 }
 
 async function refreshHistory() {
+  if (!canUseAppClient()) return;
   await ensurePreviousSeasonsClosed();
   const request = ++historyRequest;
   const month = historyMonth.value;
@@ -852,6 +844,7 @@ async function refreshHistory() {
 }
 
 async function refreshRanking() {
+  if (!canUseAppClient()) return;
   await ensurePreviousSeasonsClosed();
   const request = ++rankingRequest;
   const month = rankingMonth.value;
@@ -893,6 +886,7 @@ let playersSeasonData = null;
 let profilePlayerName = null;
 
 async function refreshPlayers() {
+  if (!canUseAppClient()) return;
   await ensurePreviousSeasonsClosed();
   const request = ++playersRequest;
   const seasonId = playersMonth.value;
@@ -920,7 +914,7 @@ async function refreshPlayers() {
     if (monthly.status === 'rejected') throw monthly.reason;
     const raw = monthly.value.filter(match => match.seasonId === seasonId);
     const replay = calculateSeasonState(raw, availablePlayers, seasonId);
-    const matches = raw.map(match => ({...match, elo:replay.matchDeltas.get(match.id)}));
+    const matches = raw.map(match => ({...match, points:replay.matchDeltas.get(match.id)}));
     const state = calculateSeasonState(matches, availablePlayers, seasonId);
     const rows = state.ranking;
     playersSeasonData = {seasonId, matches, rows, state};
@@ -950,11 +944,14 @@ function renderPlayerProfile() {
   document.getElementById('profileRating').textContent = row.rating;
   document.getElementById('profilePosition').textContent = rows.some(player => player.name === row.name)
     ? (rows.findIndex(player => player.rating === row.rating) + 1) + '° posto' : '—';
-  document.getElementById('profileNapoleons').textContent = countMatchNapoleons(matches).get(row.name) || 0;
+  const napoleonCount = countMatchNapoleons(matches).get(row.name) || 0;
+  document.getElementById('profileNapoleons').textContent = napoleonCount;
+  renderProfileIdentity(row.name,napoleonCount);
   renderRecentForm(document.getElementById('profileForm'),getRecentForm(matches,row.name));
   const change = row.rating - 1000;
   document.getElementById('profileChange').textContent = `${change > 0 ? '+' : change < 0 ? '−' : ''}${Math.abs(change)} rispetto a inizio mese`;
   document.getElementById('profileGames').textContent = row.games;
+  document.getElementById('profileParticipationBonus').textContent = '+' + (row.participationBonus ?? 0) + ' SP';
   document.getElementById('profileWins').textContent = row.wins;
   document.getElementById('profileLosses').textContent = row.losses;
   document.getElementById('profileWinRate').textContent = row.games
@@ -977,11 +974,12 @@ document.getElementById('refreshProfileButton').addEventListener('click',refresh
 document.getElementById('backToPlayersButton').addEventListener('click',() => navigateTo('players'));
 
 
-// Archived seasons are read-only snapshots, independent of the live Elo ranking.
+// Archived seasons are read-only snapshots, independent of the live Scopa Points ranking.
 // Archive snapshots are immutable; automatic closure is restricted to authorized admins.
 let hallOfFameRequest = 0;
 
 async function loadClosedSeasons() {
+  requireAppAccess();
   const snapshot = await getClosedSeasonsSnapshot();
   const seasons = [];
   snapshot.forEach(doc => {
@@ -1029,7 +1027,7 @@ function renderHallOfFame(seasons, matches = []) {
   calculateSeasonPalmares(archived).forEach(row => {
     const item = textElement('li', '', 'palmares-row');
     item.appendChild(textElement('strong', row.player));
-    item.appendChild(textElement('span', `${row.wins} ${row.wins === 1 ? 'vittoria mensile' : 'vittorie mensili'}`));
+    item.appendChild(textElement('span', `${row.wins} ${row.wins === 1 ? 'TITOLO' : 'TITOLI'}`,'titles-plate'));
     palmares.appendChild(item);
   });
   archived.forEach(season => {
@@ -1041,11 +1039,11 @@ function renderHallOfFame(seasons, matches = []) {
     if (name) card.appendChild(textElement('p', month, 'season-archive-month'));
     const podium = textElement('ul', '', 'season-archive-podium');
     [...season.podium].sort((a,b) => a.position - b.position || a.player.localeCompare(b.player, 'it')).forEach(entry => {
-      const item = textElement('li', '');
-      const medal = textElement('span', ['🥇','🥈','🥉'][entry.position - 1]);
+      const item = textElement('li', '', 'podium-place-' + entry.position);
+      const medal = textElement('span',entry.position + '°','rank-plate');
       medal.setAttribute('aria-label', `${entry.position}° posto`);
       item.appendChild(medal);
-      item.appendChild(textElement('strong', entry.player + napoleonBadge(napoleonCounts.get(entry.player))));
+      item.appendChild(playerIdentity(entry.player,napoleonCounts.get(entry.player),true));
       podium.appendChild(item);
     });
     card.appendChild(podium);
@@ -1053,7 +1051,7 @@ function renderHallOfFame(seasons, matches = []) {
 
     if ((season.weakRing ?? []).length) {
       const award = textElement('div', '', 'season-archive-award weak-ring-award');
-      award.appendChild(textElement('h4', '🔗 ANELLO DEBOLE'));
+      award.appendChild(textElement('h4', 'ANELLO DEBOLE'));
       award.appendChild(textElement('p', season.weakRing.join(' · ')));
       card.appendChild(award);
     }
@@ -1062,6 +1060,7 @@ function renderHallOfFame(seasons, matches = []) {
 }
 
 async function refreshHallOfFame() {
+  if (!canUseAppClient()) return;
   await ensurePreviousSeasonsClosed();
   const request = ++hallOfFameRequest;
   const screen = document.getElementById('hallOfFameScreen');
@@ -1186,6 +1185,7 @@ async function closeSeasonAutomatically(seasonId) {
 }
 
 async function ensurePreviousSeasonsClosed() {
+  if (!canUseAppClient()) return;
   if (!auth.currentUser) return;
   if (seasonsCheckPromise) return seasonsCheckPromise;
   const month = syncCurrentSeason();
@@ -1224,7 +1224,7 @@ async function ensurePreviousSeasonsClosed() {
 async function cancelMatchResult() {
   if (isClosingMatch || !canManageMatch(currentMatch) || currentMatch.status !== 'completed') return;
   const expected = {...currentMatch};
-  if (!window.confirm(`Annullare il risultato ${expected.scoreA} – ${expected.scoreB}? La partita tornerà in corso e l’Elo del mese sarà ricalcolato.`)) return;
+  if (!window.confirm(`Annullare il risultato ${expected.scoreA} – ${expected.scoreB}? La partita tornerà in corso.`)) return;
   isClosingMatch = true;
   updateNavigationLock();
   [enterResultButton, correctResultButton, document.getElementById('cancelMatchResultButton')].forEach(button => button.disabled = true);
@@ -1252,7 +1252,7 @@ async function cancelMatchResult() {
     if (pausedResult?.match.id === saved.id) pausedResult = null;
     playersSeasonData = null;
     await openMatch(saved);
-    notice.textContent = 'Risultato annullato. La partita è in corso e non contribuisce più all’Elo.';
+    notice.textContent = 'Risultato annullato. La partita è di nuovo in corso.';
     // Refresh hidden views too: no old statistics remain after a local cancellation.
     await Promise.all([refreshHome(), refreshRanking(), refreshHistory(), refreshPlayers()]);
   } catch (error) {
@@ -1306,11 +1306,11 @@ function getPlayerSeasonGames(matches, playerName, seasonId, state) {
       const opponents = inA ? match.teamB : match.teamA;
       const scoreFor = inA ? match.scoreA : match.scoreB;
       const scoreAgainst = inA ? match.scoreB : match.scoreA;
-      const elo = seasonState.matchDeltas.get(match.id);
-      if (!elo) throw new Error('Variazione Elo mancante per ' + match.id);
+      const points = seasonState.matchDeltas.get(match.id);
+      if (!points) throw new Error('Variazione Scopa Points mancante per ' + match.id);
       return {id:match.id, won:scoreFor > scoreAgainst, scoreFor, scoreAgainst,
         gap:Math.abs(scoreFor - scoreAgainst), teammate:own.find(name => name !== playerName),
-        opponents:[...opponents], delta:inA ? elo.deltaA : elo.deltaB};
+        opponents:[...opponents], delta:inA ? points.totalDeltaA : points.totalDeltaB};
     });
 }
 
@@ -1345,18 +1345,18 @@ function calculateOpponentStats(games) {
 
 function calculatePlayerAdvancedStats(matches, playerName, seasonId, state) {
   const games = getPlayerSeasonGames(matches, playerName, seasonId, state);
-  let rating = 1000, peakElo = 1000, streak = 0, bestWinStreak = 0;
+  let rating = 1000, peakScopaPoints = 1000, streak = 0, bestWinStreak = 0;
   let largestWin = null, largestLoss = null;
   games.forEach(game => {
     rating += game.delta;
-    peakElo = Math.max(peakElo, rating);
+    peakScopaPoints = Math.max(peakScopaPoints, rating);
     streak = game.won ? (streak > 0 ? streak + 1 : 1) : (streak < 0 ? streak - 1 : -1);
     bestWinStreak = Math.max(bestWinStreak, streak);
     // Equal gaps keep the earliest match in the immutable chronological order.
     if (game.won && (!largestWin || game.gap > largestWin.gap)) largestWin = game;
     if (!game.won && (!largestLoss || game.gap > largestLoss.gap)) largestLoss = game;
   });
-  return {rating, peakElo, streak, bestWinStreak, largestWin, largestLoss,
+  return {rating, peakScopaPoints, streak, bestWinStreak, largestWin, largestLoss,
     partnerships:calculatePartnershipStats(games), opponents:calculateOpponentStats(games)};
 }
 
@@ -1390,7 +1390,9 @@ function appendProfileStat(container, label, value, detail = '') {
 }
 
 function renderPlayerAdvancedStats(stats) {
-  document.getElementById('profilePeakElo').textContent = stats.peakElo;
+  document.getElementById('profilePeakScopaPoints').textContent = stats.peakScopaPoints;
+  const streakBadge = createWinStreakBadge(stats.streak);
+  document.getElementById('profileWinStreak').replaceChildren(...(streakBadge ? [streakBadge] : []));
   document.getElementById('profileStreak').textContent = stats.streak > 0 ? 'W' + stats.streak
     : stats.streak < 0 ? 'L' + Math.abs(stats.streak) : '—';
   const companions = document.getElementById('profileCompanions');
@@ -1409,7 +1411,7 @@ function renderPlayerAdvancedStats(stats) {
   appendProfileStat(records, 'Miglior win streak', `${stats.bestWinStreak} ${stats.bestWinStreak === 1 ? 'vittoria consecutiva' : 'vittorie consecutive'}`);
   for (const [label, game] of [['Vittoria più larga', stats.largestWin], ['Sconfitta più larga', stats.largestLoss]]) {
     appendProfileStat(records, label, game ? `${game.scoreFor} – ${game.scoreAgainst}` : '—', game
-      ? `Scarto ${game.gap} · contro ${game.opponents.join(' + ')}` : 'Nessuna partita');
+      ? `Scarto ${game.gap} · contro ${game.opponents.join(' - ')}` : 'Nessuna partita');
   }
 }
 
@@ -1451,7 +1453,7 @@ async function getClosedSeasonsSnapshot(force = false) {
 }
 
 
-// Match events are independent of Elo. Legacy results without this field have none.
+// Match events are independent of Scopa Points. Legacy results without this field have none.
 function validateMatchNapoleon(match, names) {
   const participants = [...(match.teamA || []), ...(match.teamB || [])];
   if (!Array.isArray(names) || names.length > 4 || new Set(names).size !== names.length ||
@@ -1479,11 +1481,7 @@ function getSeasonNapoleonCounts(season, matches) {
   return monthly.length ? countMatchNapoleons(monthly)
     : new Map((season.napoleon || []).map(name => [name, 1]));
 }
-function napoleonBadge(count) { return count ? ' ♛' + (count > 1 ? '×' + count : '') : ''; }
-function teamDescription(match, team) {
-  const names = getMatchNapoleon(match);
-  return team.map(name => name + napoleonBadge(Number(names.includes(name)))).join(' + ');
-}
+
 let resultNapoleon = [];
 function renderResultNapoleon() {
   const container = document.getElementById('resultNapoleonPlayers');
@@ -1513,6 +1511,7 @@ function renderRecentForm(container, form) {
   form.forEach(outcome => container.appendChild(textElement('span', outcome, 'form-mark form-' + outcome.toLowerCase())));
 }
 async function loadAllMatches() {
+  requireAppAccess();
   return snapshotMatches(await db.collection('matches').get({source:'server'}));
 }
 let playerCareerMatches = [];
@@ -1530,13 +1529,14 @@ function scoreTeamSplit(split, history) {
     [...match.teamA,...match.teamB].every(name => players.includes(name)));
   let penalty = latestTogether && isSameDraw(split, latestTogether) ? 100 : 0;
   for (const team of [split.teamA, split.teamB]) {
-    team.forEach((name,index) => {
+    // Count a repeated partnership once, even when both players last played together.
+    const repeated = team.some((name,index) => {
       const previous = recent.find(match => [...match.teamA,...match.teamB].includes(name));
-      if (previous) {
-        const previousTeam = previous.teamA.includes(name) ? previous.teamA : previous.teamB;
-        if (previousTeam.includes(team[1-index])) penalty += 10;
-      }
+      if (!previous) return false;
+      const previousTeam = previous.teamA.includes(name) ? previous.teamA : previous.teamB;
+      return previousTeam.includes(team[1-index]);
     });
+    if (repeated) penalty += 10;
   }
   return penalty;
 }
@@ -1548,7 +1548,7 @@ function chooseBalancedRandomSplit(names, history = [], randomInt = secureRandom
 }
 let isDrawing = false;
 async function drawSelectedPlayers(selected) {
-  if (isDrawing || isCreatingMatch) return;
+  if (!canUseAppClient() || isDrawing || isCreatingMatch) return;
   isDrawing = true;
   [drawButton,redrawButton,startMatchButton,cancelDrawButton].forEach(button => button.disabled = true);
   updateNavigationLock();
@@ -1586,7 +1586,7 @@ function filterHistoryMatches(matches, filter, player) {
   });
 }
 function renderHistory() {
-  const player = localStorage.getItem('rankingScopaPlayer');
+  const player = getCurrentPlayerName();
   if (!player) historyFilter = 'all';
   const filters = document.getElementById('historyFilters');
   filters.replaceChildren();
@@ -1608,7 +1608,7 @@ function renderMatchMetadata(match) {
   appendProfileStat(container,'Data',matchDate(match));
   appendProfileStat(container,'Creatore',match.createdByPlayer || 'Non disponibile');
   if (match.status !== 'completed') return;
-  appendProfileStat(container,'Vincitori',(match.scoreA > match.scoreB ? match.teamA : match.teamB).join(' + '));
+  appendProfileStat(container,'Vincitori',(match.scoreA > match.scoreB ? match.teamA : match.teamB).join(' - '));
   appendProfileStat(container,'Napoleone',getMatchNapoleon(match).join(' · ') || '—');
   appendProfileStat(container,'Risultato inserito da',match.completedByPlayer || 'Non disponibile');
   appendProfileStat(container,'Correzioni',String(match.correctionCount || 0));
@@ -1697,7 +1697,7 @@ let rosterBusy = false;
 let selectionNeedsChange = false;
 function renderPlayerChoices() {
   playerList.replaceChildren();
-  availablePlayers.forEach(player => {
+  availablePlayers.filter(player => !accessState.member?.enabled || player.name === accessState.player?.name).forEach(player => {
     const button = textElement('button',player.name,'player-button');
     button.addEventListener('click',() => selectPlayer(player.name));
     playerList.appendChild(button);
@@ -1707,7 +1707,12 @@ function renderPlayerChoices() {
     : !availablePlayers.length ? 'Non ci sono giocatori attivi. Contatta un amministratore.' : '';
 }
 function ensureSelectedPlayerActive() {
-  const name = localStorage.getItem('rankingScopaPlayer');
+  const name = getCurrentPlayerName();
+  if (accessState.member?.enabled) {
+    selectionNeedsChange = false;
+    if (accessState.player && allPlayers.some(p=>p.id===accessState.player.id)) accessState.player = allPlayers.find(p=>p.id===accessState.player.id);
+    return true;
+  }
   if (!rosterLoaded || !name || availablePlayers.some(player => player.name === name)) return true;
   pauseResultForm();
   localStorage.removeItem('rankingScopaPlayer');
@@ -1742,6 +1747,7 @@ function applyPlayersSnapshot(snapshot) {
   }
 }
 async function refreshRosterFromServer() {
+  if (!canUseAppClient()) return;
   const uid = auth.currentUser?.uid;
   if (!uid) throw new Error('Accedi prima di caricare i giocatori.');
   const snapshot = await db.collection('players').get({source:'server'});
@@ -1750,6 +1756,7 @@ async function refreshRosterFromServer() {
   return snapshot;
 }
 function startPlayersSubscription() {
+  requireAppAccess();
   if (stopPlayersListener) stopPlayersListener();
   const uid = auth.currentUser?.uid;
   rosterSubscriptionUid = uid;
@@ -1757,7 +1764,7 @@ function startPlayersSubscription() {
     let first = true;
     stopPlayersListener = db.collection('players').onSnapshot({includeMetadataChanges:true}, snapshot => {
       if (auth.currentUser?.uid !== uid || rosterSubscriptionUid !== uid) return;
-      if (snapshot.metadata?.fromCache) return;
+      if (snapshot.metadata?.fromCache || !canUseAppClient()) return;
       applyPlayersSnapshot(snapshot);
       if (first) { first = false; resolve(); }
     }, error => {
@@ -1792,8 +1799,10 @@ function renderPlayerDirectory() {
     const inactive = allPlayers.some(player => player.name === row.name && !player.active);
     const button = textElement('button','','player-profile-button');
     button.type = 'button';
-    button.appendChild(textElement('span',row.name + (inactive ? ' · INATTIVO' : ''),'player-profile-name'));
-    button.appendChild(textElement('strong',`${row.rating} Elo`,'rating-value'));
+    const identity = textElement('span','','player-profile-name');
+    identity.appendChild(createAvatar(row.name));identity.appendChild(textElement('span',row.name + (inactive ? ' · INATTIVO' : '')));
+    button.appendChild(identity);
+    button.appendChild(textElement('strong',`${row.rating} SP`,'rating-value'));
     button.appendChild(textElement('small',`${row.games} partite · ${row.wins}-${row.losses} W-L`));
     button.addEventListener('click',() => openPlayerProfile(row.name));
     directory.appendChild(button);
@@ -1916,10 +1925,11 @@ async function migratePlayersToStableIds() {
 function renderPlayerManagement() {
   const admin = isCurrentUserAdmin();
   document.getElementById('playerManagement').hidden = !admin;
+  document.getElementById('accessManagement').hidden = !admin;
   document.getElementById('setupManagementButton').hidden = !admin;
   if (!admin) {
     document.getElementById('playerAdminList').replaceChildren();
-    for (const id of ['addPlayerDialog','playerStatusDialog','playerMigrationDialog']) {
+    for (const id of ['addPlayerDialog','playerStatusDialog','playerMigrationDialog','accessApprovalDialog','unlinkDeviceDialog']) {
       const dialog = document.getElementById(id);
       if (dialog.open) dialog.close();
     }
@@ -1930,9 +1940,19 @@ function renderPlayerManagement() {
   list.replaceChildren();
   allPlayers.forEach(player => {
     const row = textElement('div','','player-admin-row');
+    row.appendChild(createAvatar(player.name));
     const label = textElement('div','');
     label.appendChild(textElement('strong',player.name));
     label.appendChild(textElement('small',player.active ? '● Attivo' : '○ Inattivo'));
+    const reset = textElement('button','RESET FOTO','text-button');
+    reset.type = 'button';reset.disabled = !getAvatarPlayerId(player.name);
+    reset.addEventListener('click',async () => {
+      if (!isCurrentUserAdmin() || !window.confirm('Rimuovere la foto di ' + player.name + '? I dispositivi autorizzati potranno caricarne una nuova.')) return;
+      reset.disabled = true;
+      try { await resetPlayerAvatarOwner(player.name);reset.textContent = 'FOTO RESETTATA'; }
+      catch (error) { reset.textContent = 'RESET NON RIUSCITO · RIPROVA';reset.title = error.message;reset.disabled = false; }
+    });
+    label.appendChild(reset);
     row.appendChild(label);
     if (isManagedPlayer(player)) {
       const button = textElement('button',player.active ? 'DISATTIVA' : 'RIATTIVA','roster-action');
@@ -2021,9 +2041,565 @@ document.querySelectorAll('[data-close-player-dialog]').forEach(button => button
 }));
 document.getElementById('setupManagementButton').addEventListener('click',() => {
   if (!isCurrentUserAdmin()) return;
-  syncCurrentSeason(); showScreen(document.getElementById('playersScreen')); refreshPlayers();
+  syncCurrentSeason(); showScreen(document.getElementById('playersScreen')); refreshPlayers(); refreshAccessManagement();
 });
 document.getElementById('refreshRosterButton').addEventListener('click',async() => {
   try { await loadAdminStatus(); await refreshRosterFromServer(); }
   catch (error) { document.getElementById('playerSelectionMessage').textContent = 'Impossibile caricare il gruppo. Verifica connessione e regole, poi riprova.'; }
+});
+
+function createNapoleonBadge(count, large = false) {
+  const badge = textElement('span','','napoleon-badge' + (large ? ' napoleon-emblem' : ''));
+  badge.setAttribute('aria-label',`${count} ${count === 1 ? 'Napoleone' : 'Napoleoni'}`);
+  badge.title = `${count} ${count === 1 ? 'Napoleone' : 'Napoleoni'}`;
+  const coin = document.createElement('img');
+  coin.src = `assets/napoleon-${large ? 'large' : 'small'}.svg`;
+  coin.alt = '';coin.width = large ? 96 : 24;coin.height = coin.width;
+  badge.appendChild(coin);
+  if (count > 1) badge.appendChild(textElement('span','×' + count,'napoleon-count'));
+  return badge;
+}
+function playerIdentity(name, napoleon = 0, avatar = false) {
+  const identity = textElement('span','','player-identity');
+  if (avatar) identity.appendChild(createAvatar(name));
+  identity.appendChild(textElement('span',name,'player-name'));
+  if (napoleon) identity.appendChild(createNapoleonBadge(napoleon));
+  return identity;
+}
+function renderTeam(container, match, team) {
+  container.replaceChildren();
+  const names = getMatchNapoleon(match);
+  team.forEach((name,index) => {
+    if (index) container.appendChild(textElement('span',' - ','team-divider'));
+    container.appendChild(playerIdentity(name,Number(names.includes(name))));
+  });
+}
+function createWinRate(row) {
+  const rate = row.games ? row.wins / row.games * 100 : null;
+  const section = textElement('div','','win-rate');
+  const labels = textElement('div','','win-rate-labels');
+  labels.appendChild(textElement('span',rate === null ? 'In attesa del primo tavolo' : `${Math.round(rate)}% win rate`));
+  section.appendChild(labels);
+  const bar = textElement('div','','win-rate-track' + (rate === null ? ' is-empty' : ''));
+  bar.setAttribute('role','meter');bar.setAttribute('aria-label','Percentuale di vittorie');
+  bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax','100');
+  bar.setAttribute('aria-valuenow',String(rate ?? 0));
+  bar.setAttribute('aria-valuetext',rate === null ? 'Nessuna partita' : `${Math.round(rate)}% vittorie`);
+  const wins = textElement('span','','win-rate-fill');wins.style.width = (rate ?? 0) + '%';
+  bar.appendChild(wins);section.appendChild(bar);return section;
+}
+
+const AVATAR_MAX_LENGTH = 150 * 1024;
+const avatarCache = new Map();
+let avatarObserver = null;
+function getAvatarPlayerId(name) {
+  const id = slugifyPlayerName(name);
+  if (!/^[a-z0-9-]{2,40}$/.test(id) || allPlayers.some(player => player.name !== name && slugifyPlayerName(player.name) === id)) return null;
+  return id;
+}
+// Selection controls the editor; ownership is enforced in the transaction and Rules.
+function canEditPlayerAvatar(name) {
+  return Boolean(canUseAppClient() && getAvatarPlayerId(name) && (isCurrentUserAdmin() || (accessState.member?.enabled && accessState.member.playerId === getAvatarPlayerId(name))));
+}
+function validAvatarData(value) {
+  return typeof value === 'string' && value.length <= AVATAR_MAX_LENGTH &&
+    (value === '' || /^data:image\/(webp|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/.test(value));
+}
+async function loadPlayerAvatar(name, force = false) {
+  const id = getAvatarPlayerId(name);
+  if (!id || !canUseAppClient()) return '';
+  const key = auth.currentUser.uid + ':' + id;
+  if (!force && avatarCache.has(key)) return avatarCache.get(key);
+  const promise = db.collection('playerProfiles').doc(id).get({source:'server'}).then(snapshot => {
+    // A save may finish while an older read is still pending.
+    if (avatarCache.get(key) !== promise) return avatarCache.get(key) || '';
+    const data = snapshot.exists ? snapshot.data().avatarData : '';
+    return validAvatarData(data) ? data : '';
+  }).catch(() => {
+    if (avatarCache.get(key) !== promise) return avatarCache.get(key) || '';
+    avatarCache.delete(key);return '';
+  });
+  avatarCache.set(key,promise);return promise;
+}
+function paintAvatar(element, data) {
+  element.querySelector('img')?.remove();
+  if (!data) return;
+  const image = document.createElement('img');image.alt = '';image.src = data;image.decoding = 'async';
+  image.addEventListener('error',() => image.remove(),{once:true});element.appendChild(image);
+}
+function createAvatar(name, size = 'small', editable = false, observe = true) {
+  const avatar = textElement(editable ? 'button' : 'span','','avatar avatar-' + size);
+  avatar.dataset.avatarName = name;
+  avatar.setAttribute('aria-label',editable ? 'Cambia foto profilo di ' + name : 'Foto di ' + name);
+  avatar.appendChild(textElement('span',Array.from(name)[0]?.toLocaleUpperCase('it') || '?','avatar-initial'));
+  if (editable) {
+    avatar.type = 'button';avatar.classList.add('avatar-editable');
+    const camera = textElement('span','','avatar-camera');camera.setAttribute('aria-hidden','true');avatar.appendChild(camera);
+    avatar.addEventListener('click',() => openAvatarEditor(name));
+  }
+  if (observe && typeof IntersectionObserver !== 'undefined') {
+    if (!avatarObserver) avatarObserver = new IntersectionObserver(entries => entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      avatarObserver.unobserve(entry.target);
+      loadPlayerAvatar(entry.target.dataset.avatarName).then(data => {
+        if (entry.target.isConnected) paintAvatar(entry.target,data);
+      });
+    }),{rootMargin:'80px'});
+    avatarObserver.observe(avatar);
+  }
+  return avatar;
+}
+function renderProfileIdentity(name, napoleon) {
+  document.getElementById('profileAvatar').replaceChildren(createAvatar(name,'large',canEditPlayerAvatar(name)));
+  const badge = document.getElementById('profileNapoleonEmblem');badge.replaceChildren();badge.hidden = !napoleon;
+  if (napoleon) {
+    badge.appendChild(createNapoleonBadge(napoleon,true));
+    badge.appendChild(textElement('span','Napoleone del mese','small-label'));
+  }
+}
+let avatarEditorName = null, avatarEditorData = null, avatarBusy = false, avatarFileRequest = 0;
+async function openAvatarEditor(name) {
+  if (!canEditPlayerAvatar(name) || avatarBusy) return;
+  avatarEditorName = name;avatarEditorData = null;const request = ++avatarFileRequest;
+  document.getElementById('avatarMessage').textContent = '';
+  document.getElementById('avatarFile').value = '';document.getElementById('avatarCameraFile').value = '';
+  document.getElementById('avatarSaveButton').disabled = true;
+  document.getElementById('avatarRemoveButton').disabled = true;
+  document.getElementById('avatarPreview').replaceChildren(createAvatar(name,'large'));
+  document.getElementById('avatarDialog').showModal();
+  const data = await loadPlayerAvatar(name);
+  if (request === avatarFileRequest && avatarEditorName === name) document.getElementById('avatarRemoveButton').disabled = !data;
+}
+async function compressAvatarFile(file) {
+  if (!file || !/^image\/(jpeg|png|webp|gif|avif|heic|heif)$/i.test(file.type)) throw new Error('Scegli una foto supportata dal browser, per esempio JPG o PNG.');
+  if (file.size > 20 * 1024 * 1024) throw new Error('Scegli una foto inferiore a 20 MB.');
+  const url = URL.createObjectURL(file), image = new Image();
+  try {
+    image.src = url;await image.decode();
+    const side = Math.min(image.naturalWidth,image.naturalHeight);
+    if (!side) throw new Error('Immagine non valida.');
+    const canvas = document.createElement('canvas');canvas.width = canvas.height = Math.min(256,side);
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Modifica immagini non supportata dal browser.');
+    context.fillStyle = '#171917';context.fillRect(0,0,canvas.width,canvas.height);
+    context.drawImage(image,(image.naturalWidth-side)/2,(image.naturalHeight-side)/2,side,side,0,0,canvas.width,canvas.height);
+    for (const quality of [.84,.72,.6,.48,.36,.24]) {
+      let data = canvas.toDataURL('image/webp',quality);
+      if (!data.startsWith('data:image/webp;')) data = canvas.toDataURL('image/jpeg',quality);
+      if (validAvatarData(data)) return data;
+    }
+    throw new Error('La foto resta troppo grande. Scegli un’altra immagine.');
+  } catch (error) {
+    throw new Error(error.name === 'EncodingError' ? 'Formato non supportato. Prova una foto JPG o PNG.' : error.message);
+  } finally { URL.revokeObjectURL(url); }
+}
+async function previewAvatarFile(file) {
+  const request = ++avatarFileRequest;
+  avatarEditorData = null;document.getElementById('avatarSaveButton').disabled = true;
+  if (!file) return;
+  document.getElementById('avatarMessage').textContent = 'Preparazione della foto…';
+  try {
+    const data = await compressAvatarFile(file);
+    if (request !== avatarFileRequest || !canEditPlayerAvatar(avatarEditorName)) return;
+    avatarEditorData = data;
+    const preview = createAvatar(avatarEditorName,'large',false,false);paintAvatar(preview,data);
+    document.getElementById('avatarPreview').replaceChildren(preview);
+    document.getElementById('avatarMessage').textContent = 'Anteprima pronta. Conferma per salvare.';
+    document.getElementById('avatarSaveButton').disabled = false;
+  } catch (error) { if (request === avatarFileRequest) document.getElementById('avatarMessage').textContent = error.message; }
+}
+async function savePlayerAvatar(name, data) {
+  if (!canEditPlayerAvatar(name)) throw new Error('Puoi modificare soltanto la foto del giocatore selezionato.');
+  if (!validAvatarData(data)) throw new Error('Foto non valida o troppo grande.');
+  const id = getAvatarPlayerId(name), uid = auth.currentUser.uid;
+  await db.runTransaction(async transaction => {
+    if (!canEditPlayerAvatar(name) || auth.currentUser.uid !== uid) throw new Error('Il giocatore selezionato è cambiato. Riapri il profilo.');
+    const ref = db.collection('playerProfiles').doc(id);
+    const snapshot = await transaction.get(ref);
+    if (!canEditPlayerAvatar(name) || auth.currentUser.uid !== uid) throw new Error('Accesso cambiato. Riapri il profilo.');
+    const photo = {avatarData:data,avatarUpdatedAt:firebase.firestore.FieldValue.serverTimestamp(),avatarUpdatedByUid:uid};
+    if (snapshot.exists && Object.prototype.hasOwnProperty.call(snapshot.data(),'ownerUid')) photo.ownerUid = snapshot.data().ownerUid;
+    transaction.set(ref,photo);
+  });
+  avatarCache.set(uid + ':' + id,Promise.resolve(data));
+  document.querySelectorAll('[data-avatar-name]').forEach(element => {
+    if (element.dataset.avatarName === name) paintAvatar(element,data);
+  });
+}
+async function commitAvatar(remove = false) {
+  if (avatarBusy || !canEditPlayerAvatar(avatarEditorName)) return;
+  if (remove && !window.confirm('Rimuovere la foto profilo e tornare all’iniziale?')) return;
+  if (!remove && avatarEditorData === null) return;
+  avatarBusy = true;
+  const dialog = document.getElementById('avatarDialog');
+  dialog.querySelectorAll('button,input').forEach(item => item.disabled = true);
+  try {
+    await savePlayerAvatar(avatarEditorName,remove ? '' : avatarEditorData);
+    avatarFileRequest++;dialog.close();
+  } catch (error) {
+    document.getElementById('avatarMessage').textContent = error.code === 'permission-denied'
+      ? 'Foto non salvata: permesso negato. Verifica il proprietario con un amministratore.'
+      : error.code ? 'Foto non salvata. Controlla la connessione e riprova.' : error.message;
+  } finally {
+    avatarBusy = false;dialog.querySelectorAll('button,input').forEach(item => item.disabled = false);
+    document.getElementById('avatarSaveButton').disabled = avatarEditorData === null;
+  }
+}
+document.getElementById('avatarGalleryButton').addEventListener('click',()=>document.getElementById('avatarFile').click());
+document.getElementById('avatarCameraButton').addEventListener('click',()=>document.getElementById('avatarCameraFile').click());
+for (const id of ['avatarFile','avatarCameraFile']) document.getElementById(id).addEventListener('change',event=>previewAvatarFile(event.target.files[0]));
+document.getElementById('avatarSaveButton').addEventListener('click',()=>commitAvatar());
+document.getElementById('avatarRemoveButton').addEventListener('click',()=>commitAvatar(true));
+document.getElementById('avatarCancelButton').addEventListener('click',()=>{if (!avatarBusy) {avatarFileRequest++;document.getElementById('avatarDialog').close();}});
+document.getElementById('avatarDialog').addEventListener('cancel',event=>{if (avatarBusy) event.preventDefault();else avatarFileRequest++;});
+
+// Admin recovery only. Normal photo removal keeps the document and ownerUid.
+async function resetPlayerAvatarOwner(name) {
+  if (!auth.currentUser || !isCurrentUserAdmin()) throw new Error('Reset riservato agli amministratori.');
+  const id = getAvatarPlayerId(name), uid = auth.currentUser.uid;
+  if (!id) throw new Error('ID giocatore non valido.');
+  await db.runTransaction(async transaction => {
+    const admin = await transaction.get(db.collection('admins').doc(uid));
+    if (!auth.currentUser || auth.currentUser.uid !== uid || !admin.exists || admin.data().enabled !== true) throw new Error('Reset riservato agli amministratori.');
+    transaction.delete(db.collection('playerProfiles').doc(id));
+  });
+  avatarCache.set(uid + ':' + id,Promise.resolve(''));
+  document.querySelectorAll('[data-avatar-name]').forEach(element => {
+    if (element.dataset.avatarName === name) paintAvatar(element,'');
+  });
+  if (avatarEditorName === name) {
+    avatarFileRequest++;avatarEditorData = null;
+    document.getElementById('avatarDialog').close();
+  }
+}
+
+let deleteMatchTarget = null;
+function openDeleteMatchDialog() {
+  if (isClosingMatch || !isCurrentUserAdmin() || !canManageMatch(currentMatch)) return;
+  deleteMatchTarget = currentMatch.id;
+  document.getElementById('deleteMatchMessage').textContent = '';
+  document.getElementById('deleteMatchDialog').showModal();
+}
+async function deleteMatchPermanently(matchId) {
+  if (!auth.currentUser) throw new Error('Eliminazione riservata agli amministratori.');
+  const uid = auth.currentUser.uid;
+  return db.runTransaction(async transaction => {
+    const admin = await transaction.get(db.collection('admins').doc(uid));
+    if (!auth.currentUser || auth.currentUser.uid !== uid || !admin.exists || admin.data().enabled !== true) throw new Error('Eliminazione riservata agli amministratori.');
+    const ref = db.collection('matches').doc(matchId);
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists) return 'missing';
+    const match = snapshot.data();
+    if (match.seasonId !== getSeasonId()) throw new Error('È possibile eliminare solo partite della stagione corrente ancora aperta.');
+    const season = await transaction.get(db.collection('seasons').doc(match.seasonId));
+    if (season.exists && season.data().closed === true) throw new Error('Questa stagione è chiusa e la partita non può più essere eliminata.');
+    if (!auth.currentUser || auth.currentUser.uid !== uid || match.seasonId !== getSeasonId()) throw new Error('La sessione o la stagione è cambiata. Riapri la partita.');
+    transaction.delete(ref);
+    return 'deleted';
+  });
+}
+async function confirmPermanentMatchDeletion() {
+  if (isClosingMatch || !deleteMatchTarget) return;
+  const id = deleteMatchTarget;
+  const dialog = document.getElementById('deleteMatchDialog');
+  isClosingMatch = true;updateNavigationLock();
+  const controls = ['dismissDeleteMatchButton','confirmDeleteMatchButton','deleteMatchButton'];
+  controls.forEach(key => document.getElementById(key).disabled = true);
+  document.getElementById('deleteMatchMessage').textContent = 'Eliminazione in corso…';
+  try {
+    const outcome = await deleteMatchPermanently(id);
+    dialog.close();deleteMatchTarget = null;
+    matchDetailRequest++;
+    if (pausedResult?.match.id === id) pausedResult = null;
+    currentMatch = null;matchAccess = {id:null,editable:false};correctionBasis = null;
+    playersSeasonData = null;
+    showScreen(homeScreen);
+    await Promise.all([refreshHome(),refreshHistory(),refreshRanking(),refreshPlayers()]);
+    document.getElementById('seasonLifecycleMessage').textContent = outcome === 'missing' ? 'Partita già eliminata.' : 'Partita eliminata definitivamente.';
+  } catch (error) {
+    document.getElementById('deleteMatchMessage').textContent = error.code === 'permission-denied'
+      ? 'Eliminazione non autorizzata: verifica i permessi admin, la stagione e le Rules pubblicate.'
+      : error.code ? 'Impossibile eliminare la partita. Controlla la connessione e riprova.' : error.message;
+  } finally {
+    isClosingMatch = false;updateNavigationLock();
+    controls.forEach(key => document.getElementById(key).disabled = false);
+  }
+}
+document.getElementById('deleteMatchButton').addEventListener('click',openDeleteMatchDialog);
+document.getElementById('confirmDeleteMatchButton').addEventListener('click',confirmPermanentMatchDeletion);
+document.getElementById('dismissDeleteMatchButton').addEventListener('click',() => {
+  if (!isClosingMatch) { deleteMatchTarget = null;document.getElementById('deleteMatchDialog').close(); }
+});
+document.getElementById('deleteMatchDialog').addEventListener('cancel',event => {
+  if (isClosingMatch) event.preventDefault();else deleteMatchTarget = null;
+});
+
+function canonicalPairKey(pair) {
+  return [...pair].sort().map(name => encodeURIComponent(name)).join('|');
+}
+function canonicalSplitKey(teamA, teamB) {
+  return [canonicalPairKey(teamA),canonicalPairKey(teamB)].sort().join('__');
+}
+function chooseDifferentSplit(players, currentSplit, randomInt = secureRandomInt) {
+  const currentKey = canonicalSplitKey(currentSplit.teamA,currentSplit.teamB);
+  const alternatives = getPossibleTeamSplits(players).filter(split => canonicalSplitKey(split.teamA,split.teamB) !== currentKey);
+  if (alternatives.length !== 2) throw new Error('Divisione corrente non valida. Ripeti il primo sorteggio.');
+  return alternatives[randomInt(2)];
+}
+function rerollCurrentTeams() {
+  if (!currentDraw || isCreatingMatch || isDrawing) return;
+  const players = [...currentDraw.teamA,...currentDraw.teamB];
+  if (players.some(name => !availablePlayers.some(player => player.name === name))) {
+    matchSaveMessage.textContent = 'Il gruppo è cambiato. Torna alla selezione dei giocatori.';return;
+  }
+  let split = chooseDifferentSplit(players,currentDraw);
+  if (secureRandomInt(2)) split = {teamA:split.teamB,teamB:split.teamA};
+  currentDraw = {...split,excluded:[...currentDraw.excluded]};
+  showDraw(currentDraw);
+}
+function createWinStreakBadge(streak) {
+  return streak >= 2 ? textElement('span',streak + ' DI FILA','win-streak-pill') : null;
+}
+
+let accessState = {uid:null,allowed:false,member:null,player:null};
+let accessEpoch = 0, accessStops = [], accessRequestUid = null;
+function canUseAppClient() {
+  return Boolean(auth.currentUser && accessState.uid === auth.currentUser.uid && accessState.allowed);
+}
+function getCurrentPlayerName() {
+  if (!canUseAppClient()) return null;
+  if (accessState.member?.enabled && accessState.player) return accessState.player.name;
+  return isCurrentUserAdmin() ? localStorage.getItem('rankingScopaPlayer') : null;
+}
+function requireAppAccess() {
+  if (!canUseAppClient()) throw new Error('Questo dispositivo non è autorizzato.');
+}
+function showAccessScreen(message, disabled = false) {
+  document.getElementById('accessTitle').textContent = disabled ? 'Accesso disabilitato.' : 'Accesso al circolo.';
+  document.getElementById('accessMessage').textContent = message;
+  document.getElementById('deviceCode').textContent = auth.currentUser?.uid || 'Connessione…';
+  document.getElementById('requestAccessForm').hidden = disabled || Boolean(accessState.member);
+  showScreen(document.getElementById('accessScreen'));
+}
+function clearPrivateSession() {
+  document.getElementById('seasonLifecycleMessage').textContent = '';
+  if (stopPlayersListener) stopPlayersListener();stopPlayersListener = null;rosterSubscriptionUid = null;
+  allPlayers = [];availablePlayers = [];rawPlayerDocuments = [];rosterLoaded = false;
+  currentDraw = null;currentMatch = null;pausedResult = null;playersSeasonData = null;
+  historyMatches = [];playerCareerMatches = [];playerCareerSeasons = null;
+  homeRequest++;historyRequest++;rankingRequest++;playersRequest++;hallOfFameRequest++;matchDetailRequest++;
+  avatarCache.clear();avatarObserver?.disconnect();
+  document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+  for (const id of ['rankingList','historyList','recentMatchesPreview','openMatches','homePodium','playersDirectory','playerAdminList','seasonPalmares','closedSeasonsList','profileContent','accessRequestsList','membersList']) {
+    // Keep the static profile structure intact for a later reauthorization.
+    if (id === 'profileContent') document.getElementById(id).hidden = true;
+    else document.getElementById(id)?.replaceChildren();
+  }
+  document.querySelectorAll('[data-avatar-name]').forEach(element => paintAvatar(element,''));
+}
+async function checkDeviceAccess() {
+  const uid = auth.currentUser?.uid, epoch = ++accessEpoch;
+  if (!uid) return;
+  try {
+    const [member,admin] = await Promise.all([
+      db.collection('members').doc(uid).get({source:'server'}),
+      db.collection('admins').doc(uid).get({source:'server'})
+    ]);
+    if (epoch !== accessEpoch || auth.currentUser?.uid !== uid) return;
+    const m = member.exists ? member.data() : null;
+    const isAdmin = admin.exists && admin.data().enabled === true;
+    adminStatus = {uid,enabled:isAdmin,loaded:true};
+    const allowed = isAdmin || m?.enabled === true;
+    const oldIdentity = accessState.player?.id;
+    accessState = {uid,allowed,member:m,player:null};
+    if (!allowed) {
+      clearPrivateSession();renderPlayerManagement();
+      showAccessScreen(m ? 'Questo dispositivo è stato disabilitato. Contatta un amministratore.' : 'Questo dispositivo non è ancora autorizzato.',Boolean(m));
+      if (!m) {
+        const request = await db.collection('accessRequests').doc(uid).get({source:'server'});
+        if (epoch === accessEpoch && request.exists) document.getElementById('accessMessage').textContent = 'Richiesta inviata. Attendi l’approvazione.';
+      }
+      return;
+    }
+    if (m?.enabled === true) {
+      if (typeof m.playerId !== 'string' || !/^[a-z0-9-]{2,40}$/.test(m.playerId)) throw Error('Associazione non valida. Contatta un amministratore.');
+      const player = await db.collection('players').doc(m.playerId).get({source:'server'});
+      if (epoch !== accessEpoch || auth.currentUser?.uid !== uid) return;
+      if (!player.exists || typeof player.data().name !== 'string') throw Error('Giocatore non disponibile. Contatta un amministratore.');
+      accessState.player = {id:m.playerId,...player.data()};
+      localStorage.setItem('rankingScopaPlayer',accessState.player.name);
+    }
+    if (oldIdentity && oldIdentity !== accessState.player?.id) {currentDraw=null;pausedResult=null;currentMatch=null;}
+    await startPlayersSubscription();
+    if (epoch !== accessEpoch || !canUseAppClient()) return;
+    renderPlayerManagement();syncCurrentSeason();
+    const name = getCurrentPlayerName();
+    if (name) {welcomePlayerName.textContent = name.toUpperCase();showScreen(homeScreen);await refreshHome();}
+    else showScreen(playerScreen); // Only the existing admin-without-member setup exception.
+  } catch (error) {
+    if (epoch !== accessEpoch) return;
+    accessState.allowed = false;clearPrivateSession();
+    showAccessScreen('Impossibile verificare l’accesso. Controlla la connessione e riprova.');
+  }
+}
+async function initializeAccess(user) {
+  accessEpoch++;accessStops.forEach(stop=>stop());accessStops=[];
+  accessState={uid:user?.uid||null,allowed:false,member:null,player:null};
+  adminStatus={uid:user?.uid||null,enabled:false,loaded:false};
+  clearPrivateSession();showAccessScreen('Verifica dell’accesso…');
+  if (!user) {
+    try { await auth.signInAnonymously(); } catch { showAccessScreen('Connessione non riuscita. Riprova.'); }
+    return;
+  }
+  await checkDeviceAccess();
+  if (auth.currentUser?.uid !== user.uid) return;
+  for (const collection of ['members','admins']) {
+    accessStops.push(db.collection(collection).doc(user.uid).onSnapshot({includeMetadataChanges:true},snapshot=>{
+      if (snapshot.metadata?.fromCache) return;
+      // Recheck even the first snapshot: it may contain a revocation after the initial get.
+      if (auth.currentUser?.uid === user.uid) {checkDeviceAccess();}
+    },()=>{accessState.allowed=false;clearPrivateSession();showAccessScreen('Accesso da verificare. Premi RICONTROLLA ACCESSO.');}));
+  }
+}
+async function requestDeviceAccess(event) {
+  event.preventDefault();const uid=auth.currentUser?.uid;
+  if (!uid) return;
+  const name=document.getElementById('accessRequestedName').value.trim();
+  const message=document.getElementById('accessMessage');
+  if (!name || name.length>50) {message.textContent='Inserisci un nome da 1 a 50 caratteri.';return;}
+  const button=document.getElementById('requestAccessButton');button.disabled=true;
+  try {
+    await db.runTransaction(async tx=>{
+      const member=await tx.get(db.collection('members').doc(uid));
+      const ref=db.collection('accessRequests').doc(uid), request=await tx.get(ref);
+      if (member.exists) throw Error('Il dispositivo è già registrato. Contatta un amministratore.');
+      if (!request.exists) tx.set(ref,{uid,requestedName:name,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+    });
+    message.textContent='Richiesta inviata. Attendi l’approvazione.';
+  } catch { message.textContent='Richiesta non inviata. Ricontrolla l’accesso o riprova più tardi.'; }
+  finally {button.disabled=false;}
+}
+async function accessAdminAction(action) {
+  const message=document.getElementById('accessAdminMessage');
+  try {await action();await refreshAccessManagement();message.textContent='Operazione completata.';}
+  catch {message.textContent='Operazione non completata. Verifica i permessi e riprova.';}
+}
+async function assertAccessAdmin(tx) {
+  const uid=auth.currentUser?.uid;if (!uid) throw Error('Operazione riservata agli amministratori.');
+  const admin=await tx.get(db.collection('admins').doc(uid));
+  if (!admin.exists || admin.data().enabled!==true || auth.currentUser?.uid!==uid) throw Error('Operazione riservata agli amministratori.');
+  return uid;
+}
+async function approveAccessRequest(uid,playerId) {
+  await db.runTransaction(async tx=>{
+    const adminUid=await assertAccessAdmin(tx);
+    const requestRef=db.collection('accessRequests').doc(uid),memberRef=db.collection('members').doc(uid);
+    const request=await tx.get(requestRef),member=await tx.get(memberRef),player=await tx.get(db.collection('players').doc(playerId));
+    if (!request.exists || member.exists || !player.exists || !isStablePlayer({id:playerId,...player.data()})) throw Error('Richiesta o giocatore non più disponibile.');
+    const stamp=firebase.firestore.FieldValue.serverTimestamp();
+    tx.set(memberRef,{enabled:true,playerId,createdAt:stamp,createdByUid:adminUid,updatedAt:stamp,updatedByUid:adminUid});
+    tx.delete(requestRef);
+  });
+}
+async function setMemberEnabled(uid,enabled) {
+  await db.runTransaction(async tx=>{
+    const adminUid=await assertAccessAdmin(tx),ref=db.collection('members').doc(uid),snapshot=await tx.get(ref);
+    if (!snapshot.exists) throw Error('Dispositivo non disponibile.');
+    // Allow the documented original four-field members to acquire update metadata.
+    tx.update(ref,{enabled,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedByUid:adminUid});
+  });
+}
+async function rejectAccessRequest(uid) {
+  await db.runTransaction(async tx=>{await assertAccessAdmin(tx);tx.delete(db.collection('accessRequests').doc(uid));});
+}
+async function refreshAccessManagement() {
+  const panel=document.getElementById('accessManagement');panel.hidden=!isCurrentUserAdmin();
+  if (!isCurrentUserAdmin() || !canUseAppClient()) return;
+  const uid=auth.currentUser.uid;
+  try {
+    const [requests,members]=await Promise.all([db.collection('accessRequests').get({source:'server'}),db.collection('members').get({source:'server'})]);
+    if (!isCurrentUserAdmin() || auth.currentUser?.uid!==uid) return;
+    const list=document.getElementById('accessRequestsList'),devices=document.getElementById('membersList');list.replaceChildren();devices.replaceChildren();
+    requests.forEach(doc=>{
+      const data=doc.data(),row=textElement('div','','access-admin-row');
+      row.appendChild(textElement('strong',data.requestedName));
+      row.appendChild(textElement('small',doc.id.slice(0,8)+'… · '+(data.createdAt?.toDate?.().toLocaleDateString('it-IT')||'In attesa')));
+      const approve=textElement('button','APPROVA','secondary-button');approve.type='button';approve.addEventListener('click',()=>openAccessApproval(doc.id,data.requestedName));
+      const reject=textElement('button','RIFIUTA','text-button');reject.type='button';reject.addEventListener('click',()=>{if(window.confirm('Rifiutare questa richiesta di accesso?'))accessAdminAction(()=>rejectAccessRequest(doc.id));});
+      row.appendChild(approve);row.appendChild(reject);list.appendChild(row);
+    });
+    if (!list.childElementCount) list.appendChild(textElement('p','Nessuna richiesta in attesa.','empty-state'));
+    members.forEach(doc=>{
+      const data=doc.data(),row=textElement('div','','access-admin-row');
+      row.appendChild(textElement('strong',allPlayers.find(p=>p.id===data.playerId)?.name||data.playerId));
+      row.appendChild(textElement('small',doc.id.slice(0,8)+'… · '+(data.enabled?'ATTIVO':'DISABILITATO')));
+      const toggle=textElement('button',data.enabled?'DISABILITA ACCESSO':'RIATTIVA ACCESSO','secondary-button');toggle.type='button';
+      toggle.addEventListener('click',()=>{if(window.confirm((data.enabled?'Disabilitare':'Riattivare')+' questo dispositivo?'))accessAdminAction(()=>setMemberEnabled(doc.id,!data.enabled));});row.appendChild(toggle);
+      const unlink=textElement('button','SCOLLEGA','secondary-button danger-button');unlink.type='button';
+      unlink.addEventListener('click',()=>openUnlinkDevice(doc.id,data.playerId,allPlayers.find(p=>p.id===data.playerId)?.name||data.playerId));
+      row.appendChild(unlink);devices.appendChild(row);
+    });
+  } catch {document.getElementById('accessAdminMessage').textContent='Impossibile caricare le richieste. Riprova.';}
+}
+function openAccessApproval(uid,name) {
+  if (!isCurrentUserAdmin()) return;
+  accessRequestUid=uid;document.getElementById('accessApprovalName').textContent=name;
+  const select=document.getElementById('accessPlayerId');select.replaceChildren();
+  allPlayers.filter(isStablePlayer).forEach(player=>{const option=textElement('option',player.name);option.value=player.id;select.appendChild(option);});
+  document.getElementById('confirmAccessApproval').disabled=!select.childElementCount;
+  document.getElementById('accessApprovalMessage').textContent='';document.getElementById('accessApprovalDialog').showModal();
+}
+document.getElementById('requestAccessForm').addEventListener('submit',requestDeviceAccess);
+document.getElementById('refreshAccessButton').addEventListener('click',()=>auth.currentUser?checkDeviceAccess():initializeAccess(null));
+document.getElementById('copyDeviceCode').addEventListener('click',async()=>{
+  try {await navigator.clipboard.writeText(auth.currentUser?.uid||'');document.getElementById('accessMessage').textContent='Codice copiato.';}
+  catch {document.getElementById('accessMessage').textContent='Seleziona e copia il codice dispositivo visualizzato.';}
+});
+document.getElementById('refreshAccessManagement').addEventListener('click',refreshAccessManagement);
+document.getElementById('cancelAccessApproval').addEventListener('click',()=>document.getElementById('accessApprovalDialog').close());
+document.getElementById('confirmAccessApproval').addEventListener('click',async()=>{
+  const button=document.getElementById('confirmAccessApproval');button.disabled=true;
+  try {await approveAccessRequest(accessRequestUid,document.getElementById('accessPlayerId').value);document.getElementById('accessApprovalDialog').close();await refreshAccessManagement();}
+  catch {document.getElementById('accessApprovalMessage').textContent='Approvazione non riuscita. Aggiorna le richieste e riprova.';}
+  finally {button.disabled=false;}
+});
+
+let unlinkDeviceTarget = null, unlinkDeviceBusy = false;
+function openUnlinkDevice(uid,playerId,name) {
+  if (!isCurrentUserAdmin() || !canUseAppClient() || unlinkDeviceBusy) return;
+  unlinkDeviceTarget = {uid,playerId};
+  document.getElementById('unlinkDeviceIdentity').textContent = name + ' · ' + uid.slice(0,8) + '…' + uid.slice(-4);
+  document.getElementById('unlinkDeviceIdentity').title = uid;
+  document.getElementById('unlinkDeviceMessage').textContent = '';
+  document.getElementById('unlinkDeviceDialog').showModal();
+}
+async function unlinkDevice(uid,expectedPlayerId) {
+  return db.runTransaction(async tx=>{
+    await assertAccessAdmin(tx);
+    const ref=db.collection('members').doc(uid),snapshot=await tx.get(ref);
+    if (!snapshot.exists) return false;
+    if (snapshot.data().playerId !== expectedPlayerId) throw new Error('Associazione cambiata. Aggiorna la lista prima di scollegare.');
+    tx.delete(ref);
+    return true;
+  });
+}
+async function confirmUnlinkDevice() {
+  if (unlinkDeviceBusy || !unlinkDeviceTarget) return;
+  const {uid,playerId}=unlinkDeviceTarget;unlinkDeviceBusy=true;
+  const buttons=['confirmUnlinkDevice','cancelUnlinkDevice'];buttons.forEach(id=>document.getElementById(id).disabled=true);
+  try {
+    const deleted=await unlinkDevice(uid,playerId);
+    document.getElementById('unlinkDeviceDialog').close();unlinkDeviceTarget=null;
+    await refreshAccessManagement();
+    document.getElementById('accessAdminMessage').textContent=deleted?'Dispositivo scollegato.':'Dispositivo già scollegato.';
+  } catch(error) {
+    document.getElementById('unlinkDeviceMessage').textContent=error.code?'Scollegamento non riuscito. Verifica i permessi e riprova.':error.message;
+  } finally {unlinkDeviceBusy=false;buttons.forEach(id=>document.getElementById(id).disabled=false);}
+}
+document.getElementById('confirmUnlinkDevice').addEventListener('click',confirmUnlinkDevice);
+document.getElementById('cancelUnlinkDevice').addEventListener('click',()=>{
+  if (!unlinkDeviceBusy) {unlinkDeviceTarget=null;document.getElementById('unlinkDeviceDialog').close();}
+});
+document.getElementById('unlinkDeviceDialog').addEventListener('cancel',event=>{
+  if(unlinkDeviceBusy)event.preventDefault();else unlinkDeviceTarget=null;
 });

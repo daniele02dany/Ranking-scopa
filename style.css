@@ -510,3 +510,19 @@ button:focus-visible, input:focus-visible { outline: 2px solid #f3d57a; outline-
 .profile-stat-grid dd.recent-form { justify-content: center; min-height: 30px; }
 .profile-stat-grid div { padding: 14px 8px; }
 .big-play-button { margin-bottom: 24px; }
+
+/* Roster administration shares the existing cards; native dialogs trap focus. */
+.player-admin-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0; border-bottom: 1px solid #403526; }
+.player-admin-row > div { min-width: 0; overflow-wrap: anywhere; }
+.player-admin-row small { display: block; color: #b9ad97; font-size: 11px; margin-top: 6px; }
+.roster-action { flex-shrink: 0; min-height: 44px; padding: 8px 10px; color: #e6cb8b; background: #201b16; border: 1px solid #665032; border-radius: 8px; font-size: 10px; cursor: pointer; }
+.roster-dialog { margin: auto; width: min(430px, calc(100% - 24px)); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 22px; border: 1px solid #826b39; border-radius: 18px; background: #171412; color: #eee5d4; }
+.roster-dialog::backdrop { background: #000b; }
+.roster-dialog h3 { color: #f3d57a; font-size: 17px; letter-spacing: 1px; margin-bottom: 18px; }
+.roster-dialog label { display: block; margin: 14px 0 8px; font-size: 13px; }
+.roster-dialog input { width: 100%; padding: 14px; font: inherit; color: #f5f0e6; background: #0f0e0d; border: 1px solid #7a6236; border-radius: 10px; }
+.roster-dialog .primary-button { font-size: 12px; letter-spacing: 1px; }
+.migration-row { padding: 12px 0; border-bottom: 1px solid #403526; overflow-wrap: anywhere; }
+.migration-row small { display: block; white-space: pre-line; margin-top: 6px; color: #b9ad97; font-size: 12px; }
+.migration-conflict { color: #d89daa; font-size: 12px; margin-top: 8px; }
+.inactive-badge { display: inline-block; color: #c4b3a0; border: 1px solid #655544; border-radius: 5px; padding: 4px 8px; font-size: 10px; letter-spacing: 1px; margin-bottom: 16px; }

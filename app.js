@@ -1,49 +1,3 @@
-const players = [
-  "Dani",
-  "Teob",
-  "Fede",
-  "Ruben",
-  "Ste",
-  "Sam",
-  "Davide",
-  "Maspe",
-  "Remì",
-  "Guarne",
-  "Sbe"
-];
-async function initializePlayers() {
-  try {
-
-    const snapshot = await db.collection("players").get();
-
-    if (!snapshot.empty) {
-      console.log("Giocatori già presenti nel database.");
-      return;
-    }
-
-    console.log("Creo i giocatori nel database...");
-
-    for (const playerName of players) {
-
-      await db.collection("players").add({
-        name: playerName,
-        active: true,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-
-    }
-
-    console.log("Giocatori creati correttamente!");
-
-  } catch (error) {
-
-    console.error(
-      "Errore durante la creazione dei giocatori:",
-      error
-    );
-
-  }
-}
 const welcomeScreen = document.getElementById("welcomeScreen");
 const playerScreen = document.getElementById("playerScreen");
 const homeScreen = document.getElementById("homeScreen");
@@ -109,6 +63,7 @@ let currentMatch = null;
 
 
 function showScreen(screen) {
+  if (selectionNeedsChange && screen !== playerScreen && !(isCurrentUserAdmin() && screen.id === 'playersScreen')) screen = playerScreen;
   document.querySelectorAll('.screen').forEach(item => item.classList.remove('active'));
   screen.classList.add("active");
   updateNavigationState(screen);
@@ -181,6 +136,7 @@ async function resumeResultForm() {
 
 function navigateTo(destination) {
   if (isDrawing || isCreatingMatch || isClosingMatch || !auth.currentUser || !localStorage.getItem('rankingScopaPlayer')) return;
+  if (!ensureSelectedPlayerActive()) return;
   syncCurrentSeason();
   pauseResultForm();
   if (destination === 'home') {
@@ -214,101 +170,51 @@ let availablePlayers = [];
 let currentDraw = null;
 
 async function createPlayerButtons() {
-  playerList.innerHTML = "";
-
-  try {
-    const snapshot = await db
-      .collection("players")
-      .where("active", "==", true)
-      .get();
-
-    const firestorePlayers = [];
-
-    snapshot.forEach((doc) => {
-      firestorePlayers.push({
-        id: doc.id,
-        ...doc.data()
-      });
-    });
-
-    firestorePlayers.sort((a, b) =>
-      a.name.localeCompare(b.name)
-    );
-    availablePlayers = firestorePlayers;
-
-    firestorePlayers.forEach((player) => {
-      const button = document.createElement("button");
-
-      button.className = "player-button";
-      button.textContent = player.name;
-
-      button.addEventListener("click", () => {
-        selectPlayer(player.name);
-      });
-
-      playerList.appendChild(button);
-    });
-
-  } catch (error) {
-    console.error(
-      "Errore durante il caricamento dei giocatori:",
-      error
-    );
-  }
+  await startPlayersSubscription();
 }
-
-
 async function selectPlayer(playerName) {
-  const user = auth.currentUser;
-
-  if (!user) {
-    alert("Errore: utente non autenticato.");
+  if (!auth.currentUser || !availablePlayers.some(player => player.name === playerName)) {
+    document.getElementById('playerSelectionMessage').textContent = 'Scegli un giocatore attivo.';
     return;
   }
-
-  localStorage.setItem("rankingScopaPlayer", playerName);
-
+  localStorage.setItem('rankingScopaPlayer',playerName);
+  selectionNeedsChange = false;
+  document.getElementById('playerSelectionMessage').textContent = '';
   welcomePlayerName.textContent = playerName.toUpperCase();
-
   showScreen(homeScreen);
+  await refreshHome();
 }
-
 
 enterButton.addEventListener("click", () => {
   showScreen(playerScreen);
 });
 
 
-auth.onAuthStateChanged(async (user) => {
-
+auth.onAuthStateChanged(async user => {
+  if (stopPlayersListener) { stopPlayersListener(); stopPlayersListener = null; }
+  rosterSubscriptionUid = null;
+  adminStatus = {uid:user?.uid || null,enabled:false,loaded:false};
+  renderPlayerManagement();
+  rosterLoaded = false;
   if (!user) {
-    try {
-      await auth.signInAnonymously();
-    } catch (error) {
-      console.error("Errore autenticazione:", error);
-    }
-
+    allPlayers = []; availablePlayers = []; rawPlayerDocuments = [];
+    try { await auth.signInAnonymously(); } catch (error) { console.error('Errore autenticazione:',error); }
     return;
   }
-
-  console.log("Utente Firebase:", user.uid);  
-  
-  await initializePlayers();
-  await createPlayerButtons();
-  await refreshHome();
-
-  const savedPlayer =
-    localStorage.getItem("rankingScopaPlayer");
-
-  if (savedPlayer) {
-    welcomePlayerName.textContent =
-      savedPlayer.toUpperCase();
-
-    showScreen(homeScreen);
-  } else {
-    showScreen(welcomeScreen);
+  try { await loadAdminStatus(); } catch (error) { console.error('Stato admin non disponibile:',error); }
+  try {
+    await createPlayerButtons();
+    if (auth.currentUser?.uid !== user.uid) return;
+    await refreshHome();
+    const savedPlayer = localStorage.getItem('rankingScopaPlayer');
+    if (savedPlayer && availablePlayers.some(player => player.name === savedPlayer)) {
+      welcomePlayerName.textContent = savedPlayer.toUpperCase();
+      showScreen(homeScreen);
+    } else showScreen(playerScreen);
+  } catch (error) {
+    document.getElementById('playerSelectionMessage').textContent = 'Impossibile caricare il gruppo. Verifica connessione e regole, poi premi AGGIORNA.';
+    showScreen(playerScreen);
   }
-
 });
 
 function createMatchPlayerList() {
@@ -499,9 +405,11 @@ async function startMatch() {
   };
 
   try {
+    await refreshRosterFromServer();
     const reference = db.collection('matches').doc();
     await db.runTransaction(async transaction => {
       await assertMatchEditable(transaction, match);
+      await assertActiveMatchPlayers(transaction, [...participants, playerName]);
       transaction.set(reference, match);
     });
     currentMatch = { ...match, id: reference.id };
@@ -1016,18 +924,7 @@ async function refreshPlayers() {
     const state = calculateSeasonState(matches, availablePlayers, seasonId);
     const rows = state.ranking;
     playersSeasonData = {seasonId, matches, rows, state};
-    const directory = document.getElementById('playersDirectory');
-    [...rows].sort((a,b) => a.name.localeCompare(b.name,'it')).forEach(row => {
-      const button = textElement('button', '', 'player-profile-button');
-      button.type = 'button';
-      button.setAttribute('aria-label', `Statistiche di ${row.name}`);
-      button.appendChild(textElement('span', row.name, 'player-profile-name'));
-      button.appendChild(textElement('strong', `${row.rating} Elo`, 'rating-value'));
-      button.appendChild(textElement('small', `${row.games} ${row.games === 1 ? 'partita' : 'partite'} · Vittorie: ${row.wins} · Sconfitte: ${row.losses}`));
-      button.addEventListener('click', () => openPlayerProfile(row.name));
-      directory.appendChild(button);
-    });
-    if (!rows.length) directory.appendChild(textElement('p','Nessun giocatore disponibile.','empty-state'));
+    renderPlayerDirectory();
     messages.forEach(message => message.textContent = '');
     if (profilePlayerName) renderPlayerProfile();
   } catch (error) {
@@ -1049,8 +946,10 @@ function renderPlayerProfile() {
   const row = rows.find(player => player.name === profilePlayerName)
     || {name:profilePlayerName, rating:1000, games:0, wins:0, losses:0};
   document.getElementById('profileName').textContent = row.name;
+  document.getElementById('profileInactiveBadge').hidden = !allPlayers.some(player => player.name === row.name && !player.active);
   document.getElementById('profileRating').textContent = row.rating;
-  document.getElementById('profilePosition').textContent = (rows.findIndex(player => player.rating === row.rating) + 1) + '° posto';
+  document.getElementById('profilePosition').textContent = rows.some(player => player.name === row.name)
+    ? (rows.findIndex(player => player.rating === row.rating) + 1) + '° posto' : '—';
   document.getElementById('profileNapoleons').textContent = countMatchNapoleons(matches).get(row.name) || 0;
   renderRecentForm(document.getElementById('profileForm'),getRecentForm(matches,row.name));
   const change = row.rating - 1000;
@@ -1259,12 +1158,11 @@ async function closeSeasonAutomatically(seasonId) {
   // including new inserts, so the set cannot change while the season is saved.
   const [matchSnapshot, playerSnapshot] = await Promise.all([
     db.collection('matches').where('seasonId', '==', seasonId).get({source:'server'}),
-    db.collection('players').where('active', '==', true).get({source:'server'})
+    db.collection('players').get({source:'server'})
   ]);
   const matches = snapshotMatches(matchSnapshot);
   if (!matches.length) return false;
-  const roster = [];
-  playerSnapshot.forEach(doc => roster.push({...doc.data(), id:doc.id}));
+  const roster = normalizePlayersSnapshot(playerSnapshot).filter(player => player.active === true);
   const awards = calculateSeasonAwards(matches, roster, seasonId);
   const created = await db.runTransaction(async transaction => {
     const snapshot = await transaction.get(reference);
@@ -1306,8 +1204,8 @@ async function ensurePreviousSeasonsClosed() {
       if (/^\d{4}-(0[1-9]|1[0-2])$/.test(id) && id < month && !closed.has(id)) pending.add(id);
     });
     if (!pending.size) { message.textContent = ''; return; }
-    const admin = await db.collection('admins').doc(auth.currentUser.uid).get({source:'server'});
-    if (!admin.exists || admin.data().enabled !== true) {
+    await loadAdminStatus();
+    if (!isCurrentUserAdmin()) {
       message.textContent = 'Stagioni da archiviare: ' + [...pending].sort().join(', ') + '. La chiusura avverrà all’apertura da un dispositivo autorizzato. Le vecchie partite sono già in sola lettura.';
       return;
     }
@@ -1659,7 +1557,13 @@ async function drawSelectedPlayers(selected) {
     try {
       history = snapshotMatches(await db.collection('matches').where('seasonId','==',getSeasonId()).get({source:'server'}));
     } catch (error) { console.error('Storico sorteggio non disponibile: sorteggio casuale.', error); }
-    currentDraw = generateDraw(selected, history);
+    const active = selected.filter(name => availablePlayers.some(player => player.name === name));
+    if (active.length < 4 || active.length !== selected.length) {
+      currentDraw = null;
+      document.getElementById('rosterMatchMessage').textContent = 'Il gruppo è cambiato. Scegli almeno quattro giocatori attivi.';
+      createMatchPlayerList(); showScreen(newMatchScreen); return;
+    }
+    currentDraw = generateDraw(active, history);
     showDraw(currentDraw);
   } finally {
     isDrawing = false;
@@ -1712,3 +1616,414 @@ function renderMatchMetadata(match) {
     `${match.previousResult.scoreA} – ${match.previousResult.scoreB}`,
     'Napoleone: ' + ((match.previousResult.napoleon || []).join(' · ') || '—'));
 }
+
+// Names remain the identity in matches. Stable IDs never rename that identity.
+function slugifyPlayerName(name) {
+  return String(name ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-|-$/g,'')
+    .slice(0,40).replace(/-$/,'');
+}
+function validatePlayerName(value) {
+  const name = typeof value === 'string' ? value.trim() : '';
+  if (!name || name.length > 50) throw new Error('Inserisci un nome da 1 a 50 caratteri.');
+  const id = slugifyPlayerName(name);
+  if (!/^[a-z0-9-]{2,40}$/.test(id)) throw new Error('Il nome deve generare un ID valido di almeno 2 caratteri.');
+  return {name,id};
+}
+function playerDocuments(snapshot) {
+  if (Array.isArray(snapshot)) return snapshot.map(player => ({...player}));
+  const documents = [];
+  snapshot.forEach(doc => documents.push({...doc.data(),id:doc.id}));
+  return documents;
+}
+function isStablePlayer(player) {
+  return typeof player.name === 'string' && /^[a-z0-9-]{2,40}$/.test(player.id)
+    && player.id === slugifyPlayerName(player.name);
+}
+function isManagedPlayer(player) {
+  return isStablePlayer(player) && typeof player.createdByUid === 'string'
+    && Boolean(player.createdAt) && typeof player.updatedByUid === 'string' && Boolean(player.updatedAt);
+}
+function normalizePlayersSnapshot(snapshot) {
+  const groups = new Map();
+  playerDocuments(snapshot).filter(player => typeof player.name === 'string' && player.name.trim()).forEach(player => {
+    // Exact canonical names: changing case/accents would merge distinct historical identities.
+    if (!groups.has(player.name)) groups.set(player.name,[]);
+    groups.get(player.name).push(player);
+  });
+  return [...groups.values()].map(group => {
+    group.sort((a,b) => Number(isStablePlayer(b)) - Number(isStablePlayer(a)) || a.id.localeCompare(b.id));
+    return {...group[0], active:group[0].active === true};
+  }).sort((a,b) => a.name.localeCompare(b.name,'it'));
+}
+
+let adminStatus = {uid:null, enabled:false, loaded:false};
+let adminStatusPromise = null;
+async function loadAdminStatus() {
+  const uid = auth.currentUser?.uid;
+  if (!uid) { adminStatus = {uid:null,enabled:false,loaded:false}; return false; }
+  if (adminStatus.loaded && adminStatus.uid === uid) return adminStatus.enabled;
+  if (adminStatusPromise?.uid === uid) return adminStatusPromise.promise;
+  const promise = db.collection('admins').doc(uid).get({source:'server'}).then(snapshot => {
+    if (auth.currentUser?.uid !== uid) return false;
+    adminStatus = {uid, enabled:snapshot.exists && snapshot.data().enabled === true, loaded:true};
+    renderPlayerManagement();
+    return adminStatus.enabled;
+  }).catch(error => {
+    if (auth.currentUser?.uid === uid) {
+      adminStatus = {uid,enabled:false,loaded:false};
+      renderPlayerManagement();
+    }
+    throw error;
+  }).finally(() => { if (adminStatusPromise?.uid === uid) adminStatusPromise = null; });
+  adminStatusPromise = {uid,promise};
+  return promise;
+}
+function isCurrentUserAdmin() {
+  return Boolean(auth.currentUser && adminStatus.uid === auth.currentUser.uid && adminStatus.enabled);
+}
+async function requirePlayerAdmin() {
+  await loadAdminStatus();
+  if (!isCurrentUserAdmin()) throw new Error('Gestione giocatori riservata agli amministratori.');
+  return auth.currentUser.uid;
+}
+
+let allPlayers = [];
+let rawPlayerDocuments = [];
+let rosterLoaded = false;
+let stopPlayersListener = null;
+let rosterSubscriptionUid = null;
+let rosterBusy = false;
+let selectionNeedsChange = false;
+function renderPlayerChoices() {
+  playerList.replaceChildren();
+  availablePlayers.forEach(player => {
+    const button = textElement('button',player.name,'player-button');
+    button.addEventListener('click',() => selectPlayer(player.name));
+    playerList.appendChild(button);
+  });
+  document.getElementById('playerSetupMessage').textContent = !allPlayers.length
+    ? 'Nessun giocatore disponibile. Un amministratore deve configurare il gruppo.'
+    : !availablePlayers.length ? 'Non ci sono giocatori attivi. Contatta un amministratore.' : '';
+}
+function ensureSelectedPlayerActive() {
+  const name = localStorage.getItem('rankingScopaPlayer');
+  if (!rosterLoaded || !name || availablePlayers.some(player => player.name === name)) return true;
+  pauseResultForm();
+  localStorage.removeItem('rankingScopaPlayer');
+  selectionNeedsChange = true;
+  currentDraw = null;
+  document.getElementById('playerSelectionMessage').textContent = 'Questo giocatore non è più attivo. Selezionane un altro.';
+  showScreen(playerScreen);
+  return false;
+}
+function applyPlayersSnapshot(snapshot) {
+  rawPlayerDocuments = playerDocuments(snapshot);
+  allPlayers = normalizePlayersSnapshot(rawPlayerDocuments);
+  availablePlayers = allPlayers.filter(player => player.active === true);
+  rosterLoaded = true;
+  const checked = new Set(Array.from(matchPlayerList.querySelectorAll('input[type="checkbox"]:checked')).map(input => input.value));
+  renderPlayerChoices();
+  createMatchPlayerList();
+  matchPlayerList.querySelectorAll('input').forEach(input => { input.checked = checked.has(input.value); });
+  if (currentDraw && [...currentDraw.teamA,...currentDraw.teamB,...currentDraw.excluded]
+      .some(name => !availablePlayers.some(player => player.name === name))) {
+    currentDraw = null;
+    document.getElementById('rosterMatchMessage').textContent = 'Il gruppo è cambiato. Scegli i giocatori attivi e sorteggia di nuovo.';
+    if (drawResultScreen.classList.contains('active')) showScreen(newMatchScreen);
+  }
+  ensureSelectedPlayerActive();
+  renderPlayerManagement();
+  if (playersSeasonData) {
+    playersSeasonData.state = calculateSeasonState(playersSeasonData.matches, availablePlayers, playersSeasonData.seasonId);
+    playersSeasonData.rows = playersSeasonData.state.ranking;
+    renderPlayerDirectory();
+    if (profilePlayerName) renderPlayerProfile();
+  }
+}
+async function refreshRosterFromServer() {
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('Accedi prima di caricare i giocatori.');
+  const snapshot = await db.collection('players').get({source:'server'});
+  if (auth.currentUser?.uid !== uid) throw new Error('Accesso cambiato. Riprova.');
+  applyPlayersSnapshot(snapshot);
+  return snapshot;
+}
+function startPlayersSubscription() {
+  if (stopPlayersListener) stopPlayersListener();
+  const uid = auth.currentUser?.uid;
+  rosterSubscriptionUid = uid;
+  return new Promise((resolve,reject) => {
+    let first = true;
+    stopPlayersListener = db.collection('players').onSnapshot({includeMetadataChanges:true}, snapshot => {
+      if (auth.currentUser?.uid !== uid || rosterSubscriptionUid !== uid) return;
+      if (snapshot.metadata?.fromCache) return;
+      applyPlayersSnapshot(snapshot);
+      if (first) { first = false; resolve(); }
+    }, error => {
+      document.getElementById('playerSelectionMessage').textContent = 'Impossibile aggiornare i giocatori. Controlla la connessione e premi AGGIORNA.';
+      if (first) { first = false; reject(error); }
+    });
+  });
+}
+async function assertActiveMatchPlayers(transaction, names) {
+  const uniqueNames = [...new Set(names)];
+  const selected = uniqueNames.map(name => availablePlayers.find(player => player.name === name));
+  if (selected.some(player => !player)) throw new Error('Un giocatore non è più attivo. Ripeti il sorteggio.');
+  for (const player of selected) {
+    const primary = await transaction.get(db.collection('players').doc(player.id));
+    const stableId = slugifyPlayerName(player.name);
+    const stable = stableId !== player.id && /^[a-z0-9-]{2,40}$/.test(stableId)
+      ? await transaction.get(db.collection('players').doc(stableId)) : primary;
+    const effective = stable.exists && stable.data().name === player.name ? stable : primary;
+    if (!effective.exists || effective.data().name !== player.name || effective.data().active !== true) {
+      throw new Error('Un giocatore non è più attivo. Ripeti il sorteggio.');
+    }
+  }
+}
+function renderPlayerDirectory() {
+  if (!playersSeasonData) return;
+  const directory = document.getElementById('playersDirectory');
+  directory.replaceChildren();
+  // Inactive profiles remain available even in a month without appearances.
+  const rows = new Map(playersSeasonData.rows.map(row => [row.name,row]));
+  allPlayers.forEach(player => { if (!rows.has(player.name)) rows.set(player.name,{name:player.name,rating:1000,games:0,wins:0,losses:0}); });
+  [...rows.values()].sort((a,b) => a.name.localeCompare(b.name,'it')).forEach(row => {
+    const inactive = allPlayers.some(player => player.name === row.name && !player.active);
+    const button = textElement('button','','player-profile-button');
+    button.type = 'button';
+    button.appendChild(textElement('span',row.name + (inactive ? ' · INATTIVO' : ''),'player-profile-name'));
+    button.appendChild(textElement('strong',`${row.rating} Elo`,'rating-value'));
+    button.appendChild(textElement('small',`${row.games} partite · ${row.wins}-${row.losses} W-L`));
+    button.addEventListener('click',() => openPlayerProfile(row.name));
+    directory.appendChild(button);
+  });
+  if (!rows.size) directory.appendChild(textElement('p','Nessun giocatore disponibile.','empty-state'));
+}
+
+function buildPlayerMigrationAnalysis(snapshot) {
+  const documents = playerDocuments(snapshot), byId = new Map(documents.map(player => [player.id,player]));
+  const byName = new Map(), byTarget = new Map();
+  documents.forEach(player => {
+    const key = typeof player.name === 'string' ? player.name.trim().toLowerCase() : '';
+    if (!byName.has(key)) byName.set(key,[]);
+    byName.get(key).push(player);
+    const target = slugifyPlayerName(player.name);
+    if (!byTarget.has(target)) byTarget.set(target,[]);
+    byTarget.get(target).push(player);
+  });
+  const entries = documents.map(player => {
+    const targetId = slugifyPlayerName(player.name), stable = isStablePlayer(player);
+    let collision = '';
+    try { validatePlayerName(player.name); } catch (error) { collision = error.message; }
+    // Migration preserves names verbatim. Do not silently trim historical identities.
+    if (typeof player.name === 'string' && player.name !== player.name.trim()) collision = 'Nome storico con spazi esterni: verifica manuale necessaria.';
+    const target = byId.get(targetId);
+    const aliases = byTarget.get(targetId) || [];
+    if (target && target.name !== player.name) collision = 'ID occupato da un nome diverso: ' + target.name;
+    if (new Set(aliases.map(item => item.name)).size > 1) collision = 'Più nomi distinti generano lo stesso ID.';
+    const duplicates = byName.get(typeof player.name === 'string' ? player.name.trim().toLowerCase() : '') || [];
+    if (new Set(duplicates.map(item => item.name)).size > 1) collision = 'Nomi diversi soltanto per maiuscole/spazi: verifica identità storiche.';
+    const equivalent = aliases.filter(item => item.name === player.name);
+    if (!target && new Set(equivalent.map(item => typeof item.active === 'boolean' ? item.active : true)).size > 1) collision = 'Duplicati con stato attivo discordante: verifica manuale necessaria.';
+    return {id:player.id,name:player.name,targetId,stable,collision,exists:!!target,
+      active:typeof player.active === 'boolean' ? player.active : true,
+      duplicateIds:duplicates.filter(item => item.id !== player.id).map(item => item.id)};
+  });
+  return {entries, legacy:entries.filter(entry => !entry.stable), collisions:entries.filter(entry => entry.collision)};
+}
+async function analyzePlayerMigration() {
+  await requirePlayerAdmin();
+  return buildPlayerMigrationAnalysis(await refreshRosterFromServer());
+}
+function newPlayerDocument(name, active, uid) {
+  return {name,active,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:uid,
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedByUid:uid};
+}
+async function addPlayer(value) {
+  const uid = await requirePlayerAdmin(), {name,id} = validatePlayerName(value);
+  const snapshot = await refreshRosterFromServer();
+  const documents = playerDocuments(snapshot);
+  const duplicates = documents.filter(player => typeof player.name === 'string' && player.name.trim().toLowerCase() === name.toLowerCase());
+  const known = normalizePlayersSnapshot(duplicates)[0];
+  const target = documents.find(player => player.id === id);
+  if (target && target.name?.trim().toLowerCase() !== name.toLowerCase()) throw new Error('ID già utilizzato da un altro nome. Scegli un nome diverso.');
+  if (known && !isManagedPlayer(known)) throw new Error('Giocatore già presente. Migra gli ID legacy prima di gestirlo.');
+  if (known?.active) throw new Error('Giocatore già presente');
+  const reference = db.collection('players').doc(id);
+  const outcome = await db.runTransaction(async transaction => {
+    const current = await transaction.get(reference);
+    if (current.exists) {
+      const player = {...current.data(),id};
+      if (player.name?.trim().toLowerCase() !== name.toLowerCase()) throw new Error('ID già utilizzato da un altro nome.');
+      if (!isManagedPlayer(player)) throw new Error('Documento esistente da verificare in Firebase Console.');
+      if (player.active === true) throw new Error('Giocatore già presente');
+      transaction.update(reference,{active:true,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedByUid:uid});
+      return 'Giocatore riattivato';
+    }
+    if (known) throw new Error('Il roster è cambiato. Aggiorna e riprova.');
+    transaction.set(reference,newPlayerDocument(name,true,uid));
+    return 'Giocatore aggiunto';
+  });
+  await refreshRosterFromServer();
+  return outcome;
+}
+async function setPlayerActive(id, active) {
+  const uid = await requirePlayerAdmin();
+  if (typeof active !== 'boolean') throw new Error('Stato non valido.');
+  const reference = db.collection('players').doc(id);
+  await db.runTransaction(async transaction => {
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists || !isManagedPlayer({...snapshot.data(),id})) throw new Error('Migra prima gli ID legacy. I documenti stabili incompleti vanno verificati in Console.');
+    if (snapshot.data().active === active) return;
+    transaction.update(reference,{active,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedByUid:uid});
+  });
+  await refreshRosterFromServer();
+}
+
+let migrationPreview = null;
+let migrationApproved = null;
+async function migratePlayersToStableIds() {
+  const uid = await requirePlayerAdmin();
+  if (!migrationPreview || migrationApproved !== migrationPreview) throw new Error('Apri l’anteprima e conferma esplicitamente la migrazione.');
+  const plan = migrationApproved;
+  migrationApproved = null; // one UI confirmation authorizes one run only
+  const result = {created:[],existing:[],skipped:[]};
+  const groups = new Map();
+  plan.legacy.forEach(entry => {
+    if (entry.collision) { result.skipped.push({name:entry.name,reason:entry.collision}); return; }
+    if (!groups.has(entry.targetId)) groups.set(entry.targetId,[]);
+    groups.get(entry.targetId).push(entry);
+  });
+  for (const [id,entries] of groups) {
+    const reference = db.collection('players').doc(id);
+    const outcome = await db.runTransaction(async transaction => {
+      const target = await transaction.get(reference);
+      const sources = await Promise.all(entries.map(entry => transaction.get(db.collection('players').doc(entry.id))));
+      if (sources.some((source,index) => !source.exists || source.data().name !== entries[index].name ||
+          (typeof source.data().active === 'boolean' ? source.data().active : true) !== entries[index].active)) return 'changed';
+      if (target.exists) return target.data().name === entries[0].name ? 'existing' : 'collision';
+      transaction.set(reference,newPlayerDocument(entries[0].name,entries[0].active,uid));
+      return 'created';
+    });
+    if (outcome === 'created' || outcome === 'existing') result[outcome].push(id);
+    else result.skipped.push({name:entries[0].name,reason:outcome === 'changed' ? 'Dati modificati dopo l’anteprima.' : 'ID occupato da un altro nome.'});
+  }
+  await refreshRosterFromServer();
+  return result;
+}
+
+function renderPlayerManagement() {
+  const admin = isCurrentUserAdmin();
+  document.getElementById('playerManagement').hidden = !admin;
+  document.getElementById('setupManagementButton').hidden = !admin;
+  if (!admin) {
+    document.getElementById('playerAdminList').replaceChildren();
+    for (const id of ['addPlayerDialog','playerStatusDialog','playerMigrationDialog']) {
+      const dialog = document.getElementById(id);
+      if (dialog.open) dialog.close();
+    }
+    migrationPreview = null; migrationApproved = null;
+    return;
+  }
+  const list = document.getElementById('playerAdminList');
+  list.replaceChildren();
+  allPlayers.forEach(player => {
+    const row = textElement('div','','player-admin-row');
+    const label = textElement('div','');
+    label.appendChild(textElement('strong',player.name));
+    label.appendChild(textElement('small',player.active ? '● Attivo' : '○ Inattivo'));
+    row.appendChild(label);
+    if (isManagedPlayer(player)) {
+      const button = textElement('button',player.active ? 'DISATTIVA' : 'RIATTIVA','roster-action');
+      button.type = 'button'; button.disabled = rosterBusy;
+      button.addEventListener('click',() => openPlayerStatusDialog(player));
+      row.appendChild(button);
+    } else row.appendChild(textElement('small',isStablePlayer(player) ? 'Schema da verificare in Console' : 'ID legacy · migrazione necessaria','scoring-rule'));
+    list.appendChild(row);
+  });
+  document.getElementById('migratePlayersButton').hidden = !buildPlayerMigrationAnalysis(rawPlayerDocuments).legacy.length;
+  for (const id of ['addPlayerButton','migratePlayersButton']) document.getElementById(id).disabled = rosterBusy;
+}
+let playerStatusTarget = null;
+function openPlayerStatusDialog(player) {
+  if (!isCurrentUserAdmin() || rosterBusy) return;
+  playerStatusTarget = {id:player.id,active:!player.active};
+  document.getElementById('playerStatusText').textContent = (player.active ? 'Disattivare ' : 'Riattivare ') + player.name + '? Storico e statistiche rimangono disponibili.';
+  document.getElementById('playerStatusMessage').textContent = '';
+  document.getElementById('playerStatusDialog').showModal();
+}
+async function runRosterAction(action,messageElement) {
+  if (rosterBusy) return;
+  rosterBusy = true; renderPlayerManagement();
+  document.querySelectorAll('.roster-dialog button, .roster-dialog input').forEach(element => element.disabled = true);
+  try { await action(); }
+  catch (error) {
+    messageElement.textContent = error.code === 'permission-denied' ? 'Operazione non autorizzata. Verifica le regole players e l’abilitazione admin.' : error.code ? 'Operazione non completata. Aggiorna e riprova; eventuali creazioni già riuscite saranno riconosciute.' : error.message;
+  } finally {
+    rosterBusy = false;
+    document.querySelectorAll('.roster-dialog button, .roster-dialog input').forEach(element => element.disabled = false);
+    renderPlayerManagement();
+  }
+}
+document.getElementById('addPlayerButton').addEventListener('click',() => {
+  if (!isCurrentUserAdmin() || rosterBusy) return;
+  document.getElementById('addPlayerForm').reset();
+  document.getElementById('addPlayerMessage').textContent = '';
+  document.getElementById('addPlayerDialog').showModal();
+  document.getElementById('newPlayerName').focus();
+});
+document.getElementById('addPlayerForm').addEventListener('submit',event => {
+  event.preventDefault();
+  return runRosterAction(async() => {
+    const message = await addPlayer(document.getElementById('newPlayerName').value);
+    document.getElementById('playerManagementMessage').textContent = message;
+    document.getElementById('addPlayerDialog').close();
+  },document.getElementById('addPlayerMessage'));
+});
+document.getElementById('confirmPlayerStatusButton').addEventListener('click',() => runRosterAction(async() => {
+  if (!playerStatusTarget) return;
+  await setPlayerActive(playerStatusTarget.id,playerStatusTarget.active);
+  document.getElementById('playerManagementMessage').textContent = playerStatusTarget.active ? 'Giocatore riattivato.' : 'Giocatore disattivato.';
+  document.getElementById('playerStatusDialog').close();
+},document.getElementById('playerStatusMessage')));
+document.getElementById('migratePlayersButton').addEventListener('click',() => runRosterAction(async() => {
+  migrationPreview = await analyzePlayerMigration(); migrationApproved = null;
+  const list = document.getElementById('playerMigrationPreview'); list.replaceChildren();
+  migrationPreview.legacy.forEach(entry => {
+    const row = textElement('div','','migration-row');
+    row.appendChild(textElement('strong',String(entry.name ?? 'Nome mancante')));
+    row.appendChild(textElement('small',`Vecchio ID: ${entry.id}\nNuovo ID: ${entry.targetId}`));
+    if (entry.duplicateIds.length) row.appendChild(textElement('small','Duplicati per nome: ' + entry.duplicateIds.join(', ')));
+    if (entry.collision) row.appendChild(textElement('p','SALTATO · ' + entry.collision,'migration-conflict'));
+    else if (entry.exists) row.appendChild(textElement('small','Target già presente: nessuna sovrascrittura.'));
+    list.appendChild(row);
+  });
+  document.getElementById('playerMigrationMessage').textContent = 'Saranno creati solo gli ID mancanti senza collisioni. Nessun documento sarà eliminato.';
+  document.getElementById('playerMigrationDialog').showModal();
+},document.getElementById('playerManagementMessage')));
+document.getElementById('confirmPlayerMigrationButton').addEventListener('click',() => runRosterAction(async() => {
+  if (!migrationPreview) return;
+  migrationApproved = migrationPreview;
+  const result = await migratePlayersToStableIds();
+  const message = document.getElementById('playerMigrationMessage');
+  message.textContent = (result.skipped.length ? 'Migrazione parziale.' : 'Migrazione completata.') + ' I vecchi documenti non sono stati eliminati.'
+    + ` Creati: ${result.created.length}. Già presenti: ${result.existing.length}. Saltati: ${result.skipped.length}.`
+    + result.skipped.map(item => ` ${item.name}: ${item.reason}`).join('');
+  migrationPreview = null;
+},document.getElementById('playerMigrationMessage')));
+for (const id of ['addPlayerDialog','playerStatusDialog','playerMigrationDialog']) {
+  const dialog = document.getElementById(id);
+  dialog.addEventListener('cancel',event => { if (rosterBusy) event.preventDefault(); });
+}
+document.querySelectorAll('[data-close-player-dialog]').forEach(button => button.addEventListener('click',() => {
+  if (!rosterBusy) document.getElementById(button.dataset.closePlayerDialog).close();
+}));
+document.getElementById('setupManagementButton').addEventListener('click',() => {
+  if (!isCurrentUserAdmin()) return;
+  syncCurrentSeason(); showScreen(document.getElementById('playersScreen')); refreshPlayers();
+});
+document.getElementById('refreshRosterButton').addEventListener('click',async() => {
+  try { await loadAdminStatus(); await refreshRosterFromServer(); }
+  catch (error) { document.getElementById('playerSelectionMessage').textContent = 'Impossibile caricare il gruppo. Verifica connessione e regole, poi riprova.'; }
+});

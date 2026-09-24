@@ -77,8 +77,26 @@ service cloud.firestore {
     }
 
     match /players/{playerId} {
-      allow read: if true;
-      allow create, update: if signedIn();
+      function stablePlayerSchema(data) {
+        return playerId.matches('^[a-z0-9-]{2,40}$')
+          && data.keys().hasAll(['name','active','createdAt','createdByUid','updatedAt','updatedByUid'])
+          && data.keys().hasOnly(['name','active','createdAt','createdByUid','updatedAt','updatedByUid'])
+          && data.name is string && data.name.trim().size() > 0 && data.name.size() <= 50
+          && data.active is bool
+          && data.createdAt is timestamp && data.updatedAt is timestamp
+          && data.createdByUid is string && data.updatedByUid is string;
+      }
+      allow read: if signedIn();
+      allow create: if isSeasonAdmin() && stablePlayerSchema(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.updatedByUid == request.auth.uid;
+      allow update: if isSeasonAdmin()
+        && stablePlayerSchema(resource.data) && stablePlayerSchema(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active','updatedAt','updatedByUid'])
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedByUid == request.auth.uid;
       allow delete: if false;
     }
 

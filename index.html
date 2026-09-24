@@ -27,8 +27,11 @@
     <section id="playerScreen" class="screen">
       <h2>CHI SEI?</h2>
 
-      <div id="playerList" class="player-list">
-      </div>
+      <p id="playerSelectionMessage" class="match-message" role="status"></p>
+      <p id="playerSetupMessage" class="scoring-rule"></p>
+      <div id="playerList" class="player-list"></div>
+      <button id="refreshRosterButton" class="secondary-button" type="button">AGGIORNA</button>
+      <button id="setupManagementButton" class="secondary-button" type="button" hidden>GESTIONE GIOCATORI</button>
     </section>
 
 
@@ -115,6 +118,7 @@
     Seleziona almeno 4 giocatori
   </p>
 
+  <p id="rosterMatchMessage" class="match-message" role="status"></p>
   <div id="matchPlayerList" class="player-list">
   </div>
 
@@ -284,11 +288,20 @@
   <button id="refreshPlayersButton" class="secondary-button">AGGIORNA</button>
   <p id="playersMessage" class="match-message" role="status"></p>
   <div id="playersDirectory" class="players-directory"></div>
+  <section id="playerManagement" class="profile-career-card" hidden aria-labelledby="playerManagementTitle">
+    <h3 id="playerManagementTitle">GESTIONE GIOCATORI</h3>
+    <p class="scoring-rule">Il nome identifica lo storico e non può essere cambiato.</p>
+    <div id="playerAdminList"></div>
+    <button id="addPlayerButton" class="secondary-button" type="button">+ AGGIUNGI GIOCATORE</button>
+    <button id="migratePlayersButton" class="text-button" type="button" hidden>MIGRA ID GIOCATORI</button>
+    <p id="playerManagementMessage" class="match-message" role="status"></p>
+  </section>
 </section>
 
 <section id="playerProfileScreen" class="screen">
   <p class="small-label">SCHEDA GIOCATORE</p>
   <h2 id="profileName"></h2>
+  <p id="profileInactiveBadge" class="inactive-badge" hidden>INATTIVO</p>
   <label class="month-label" for="profileMonth">Mese delle statistiche</label>
   <input id="profileMonth" class="month-input" type="month">
   <button id="refreshProfileButton" class="secondary-button">AGGIORNA</button>
@@ -326,6 +339,30 @@
 </section>
 
   </main>
+  <dialog id="addPlayerDialog" class="roster-dialog" aria-labelledby="addPlayerTitle">
+    <h3 id="addPlayerTitle">AGGIUNGI GIOCATORE</h3>
+    <form id="addPlayerForm" novalidate>
+      <label for="newPlayerName">Nome del giocatore</label>
+      <input id="newPlayerName" name="playerName" maxlength="50" autocomplete="off" required>
+      <p class="scoring-rule">Il nome sarà definitivo. Un giocatore già presente ma inattivo verrà riattivato.</p>
+      <p id="addPlayerMessage" class="match-message" role="status"></p>
+      <button class="primary-button" type="submit">CONFERMA</button>
+      <button class="secondary-button" type="button" data-close-player-dialog="addPlayerDialog">ANNULLA</button>
+    </form>
+  </dialog>
+  <dialog id="playerStatusDialog" class="roster-dialog" aria-labelledby="playerStatusTitle">
+    <h3 id="playerStatusTitle">STATO GIOCATORE</h3>
+    <p id="playerStatusText"></p><p id="playerStatusMessage" class="match-message" role="status"></p>
+    <button id="confirmPlayerStatusButton" class="primary-button" type="button">CONFERMA</button>
+    <button class="secondary-button" type="button" data-close-player-dialog="playerStatusDialog">ANNULLA</button>
+  </dialog>
+  <dialog id="playerMigrationDialog" class="roster-dialog" aria-labelledby="playerMigrationTitle">
+    <h3 id="playerMigrationTitle">MIGRA ID GIOCATORI</h3>
+    <div id="playerMigrationPreview"></div>
+    <p id="playerMigrationMessage" class="match-message" role="status"></p>
+    <button id="confirmPlayerMigrationButton" class="primary-button" type="button">CONFERMO LA MIGRAZIONE</button>
+    <button class="secondary-button" type="button" data-close-player-dialog="playerMigrationDialog">CHIUDI</button>
+  </dialog>
 
   <div id="draftResumeBar" class="draft-resume-bar" hidden>
     <span>Risultato non salvato</span>

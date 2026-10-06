@@ -173,3 +173,6 @@ dialog{max-height:calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-ins
 @media(max-width:600px){input,select,textarea{font-size:16px}}
 
 @media(max-width:360px){.app{padding-left:calc(16px + env(safe-area-inset-left,0px));padding-right:calc(16px + env(safe-area-inset-right,0px))}}
+
+/* Full monthly standings, shared renderer in compact Home mode. */
+.home-ranking{display:grid;gap:0}.home-ranking .ranking-row{padding:14px 0;border:0;border-bottom:1px solid var(--line);border-radius:0;background:none;box-shadow:none;grid-template-columns:22px minmax(0,1fr) auto;gap:8px}.home-ranking .ranking-person{min-width:0;gap:8px}.home-ranking .avatar{--size:32px}.home-ranking .player-identity{font-size:13px}.home-ranking .points-block strong{font-size:24px}.home-ranking .rank-number{font-size:21px}.home-ranking .ranking-person small{font-size:10px}.home-ranking .ranking-row:last-child{border-bottom:0}

@@ -759,7 +759,7 @@ function calculateRanking(matches, roster = availablePlayers) {
   return calculateSeasonState(matches, roster).ranking;
 }
 
-function renderRanking(container, rows, matches = []) {
+function renderRanking(container, rows, matches = [], compact = false) {
   const napoleon = countMatchNapoleons(matches);
   container.replaceChildren();let previousRating,position = 0;
   rows.forEach((row,index) => {
@@ -772,11 +772,11 @@ function renderRanking(container, rows, matches = []) {
     identity.appendChild(textElement('small',row.games ? row.games + (row.games === 1 ? ' partita' : ' partite') + ' · ' + row.wins + 'W - ' + row.losses + 'L' : 'Nessuna partita giocata'));person.appendChild(identity);entry.appendChild(person);
     const points = textElement('div','','points-block');points.appendChild(textElement('strong',String(row.rating)));
     points.appendChild(textElement('small','SP'));points.setAttribute('aria-label',row.rating + ' Scopa Points');entry.appendChild(points);
-    entry.appendChild(createWinRate(row));
-    if (row.games) entry.appendChild(textElement('small','Bonus +' + row.participationBonus + ' SP','participation-bonus'));
+    if (!compact) entry.appendChild(createWinRate(row));
+    if (!compact && row.games) entry.appendChild(textElement('small','Bonus +' + row.participationBonus + ' SP','participation-bonus'));
     const streakBadge = createWinStreakBadge(calculatePlayerAdvancedStats(matches,row.name,matches[0]?.seasonId).streak);
     if (streakBadge) identity.appendChild(streakBadge);
-    if (row.games) { const form = textElement('span','','recent-form');renderRecentForm(form,getRecentForm(matches,row.name));entry.appendChild(form); }
+    if (!compact && row.games) { const form = textElement('span','','recent-form');renderRecentForm(form,getRecentForm(matches,row.name));entry.appendChild(form); }
     container.appendChild(entry);
   });
 }
@@ -800,22 +800,13 @@ async function refreshHome() {
     renderMatches(recentMatchesPreview, matches.filter(match => match.status === 'completed').slice(0,3), 'Nessuna partita conclusa questo mese.', true);
     const podium = document.getElementById('homePodium');
     podium.replaceChildren();
-    const ranked = calculateRanking(matches).filter(row => row.games > 0);
+    const ranked = calculateRanking(matches);
     const own = ranked.find(row => row.name === selectedName);
     document.getElementById('homePlayerSummary').textContent = own
       ? (ranked.findIndex(row => row.rating === own.rating) + 1) + '° nel mese · ' + own.rating + ' SP · ' + own.wins + 'W - ' + own.losses + 'L'
       : 'Il tuo mese deve ancora iniziare';
-    let rank = 0;
-    ranked.slice(0,3).forEach((row,index) => {
-      if (index === 0 || row.rating !== ranked[index - 1].rating) rank = index + 1;
-      const item = textElement('div','');
-      item.appendChild(textElement('span',`${rank}°`,'podium-rank'));
-      item.appendChild(createAvatar(row.name));
-      item.appendChild(playerIdentity(row.name,countMatchNapoleons(matches).get(row.name)));
-      item.appendChild(textElement('small',`${row.rating} SP`));
-      podium.appendChild(item);
-    });
-    if (!ranked.length) podium.appendChild(textElement('p','La classifica inizierà con la prima partita conclusa.','empty-state'));
+    renderRanking(podium, ranked, matches, true);
+    document.getElementById('homeRankingMonth').textContent = new Date(month + '-01T12:00:00Z').toLocaleDateString('it-IT',{month:'long',year:'numeric',timeZone:'Europe/Rome'});
     message.textContent = '';
   } catch (error) {
     if (request !== homeRequest) return;
@@ -1150,6 +1141,8 @@ async function closeSeasonAutomatically(seasonId) {
   if (!auth.currentUser || !/^\d{4}-(0[1-9]|1[0-2])$/.test(seasonId) || seasonId >= getSeasonId()) {
     throw new Error('Si possono archiviare soltanto mesi precedenti.');
   }
+  await loadAdminStatus();
+  if (!isCurrentUserAdmin()) return false;
   const reference = db.collection('seasons').doc(seasonId);
   const existing = await reference.get({source: 'server'});
   if (existing.exists && existing.data().closed === true) return false;
@@ -1163,7 +1156,9 @@ async function closeSeasonAutomatically(seasonId) {
   if (!matches.length) return false;
   const roster = normalizePlayersSnapshot(playerSnapshot).filter(player => player.active === true);
   const awards = calculateSeasonAwards(matches, roster, seasonId);
+  let writeAttempted = false;
   const created = await db.runTransaction(async transaction => {
+    await assertAccessAdmin(transaction);
     const snapshot = await transaction.get(reference);
     if (snapshot.exists && snapshot.data().closed === true) return false;
     const previous = snapshot.exists ? snapshot.data() : {};
@@ -1172,6 +1167,7 @@ async function closeSeasonAutomatically(seasonId) {
     if ([awards.podium, awards.weakRing, napoleon].some(list => list.length > 32)) {
       throw new Error('Archivio oltre 32 nomi: occorre estendere la validazione delle regole.');
     }
+    writeAttempted = true;
     transaction.set(reference, {
       seasonId, year:Number(seasonId.slice(0,4)), month:Number(seasonId.slice(5)),
       name: previous.name ?? '', closed:true,
@@ -1179,45 +1175,47 @@ async function closeSeasonAutomatically(seasonId) {
       podium:awards.podium, napoleon:[...napoleon], weakRing:awards.weakRing
     }, {merge:true});
     return true;
-  });
+  }).catch(error => { error.archiveWriteAttempted = writeAttempted; throw error; });
   if (created) invalidateClosedSeasons();
   return created;
 }
 
 async function ensurePreviousSeasonsClosed() {
-  if (!canUseAppClient()) return;
-  if (!auth.currentUser) return;
-  if (seasonsCheckPromise) return seasonsCheckPromise;
-  const month = syncCurrentSeason();
   const message = document.getElementById('seasonLifecycleMessage');
+  if (!canUseAppClient() || !auth.currentUser || !isCurrentUserAdmin()) { message.textContent = ''; return; }
+  if (seasonsCheckPromise) return seasonsCheckPromise;
+  const uid = auth.currentUser.uid, month = syncCurrentSeason();
+  const stillAdmin = () => auth.currentUser?.uid === uid && isCurrentUserAdmin();
   seasonsCheckPromise = (async () => {
-    message.textContent = 'Controllo delle stagioni precedenti…';
-    const [matches, seasons] = await Promise.all([
-      db.collection('matches').where('seasonId', '<', month).get({source:'server'}),
-      getClosedSeasonsSnapshot(true)
-    ]);
-    const closed = new Set();
-    seasons.forEach(doc => closed.add(doc.id));
-    const pending = new Set();
-    matches.forEach(doc => {
-      const id = doc.data().seasonId;
-      if (/^\d{4}-(0[1-9]|1[0-2])$/.test(id) && id < month && !closed.has(id)) pending.add(id);
-    });
-    if (!pending.size) { message.textContent = ''; return; }
-    await loadAdminStatus();
-    if (!isCurrentUserAdmin()) {
-      message.textContent = 'Stagioni da archiviare: ' + [...pending].sort().join(', ') + '. La chiusura avverrà all’apertura da un dispositivo autorizzato. Le vecchie partite sono già in sola lettura.';
+    message.textContent = '';
+    let pending;
+    try {
+      const [matches, seasons] = await Promise.all([
+        db.collection('matches').where('seasonId', '<', month).get({source:'server'}),
+        getClosedSeasonsSnapshot(true)
+      ]);
+      const closed = new Set(); seasons.forEach(doc => closed.add(doc.id));
+      pending = new Set();
+      matches.forEach(doc => {
+        const id = doc.data().seasonId;
+        if (/^\d{4}-(0[1-9]|1[0-2])$/.test(id) && id < month && !closed.has(id)) pending.add(id);
+      });
+    } catch (error) {
+      console.error('Verifica stagioni non riuscita:', error);
+      if (stillAdmin()) message.textContent = 'Impossibile verificare i mesi precedenti. Premi AGGIORNA per riprovare.';
       return;
     }
     for (const id of [...pending].sort()) {
-      message.textContent = 'Chiusura della stagione ' + id + '…';
-      await closeSeasonAutomatically(id);
+      if (!stillAdmin()) return;
+      try { await closeSeasonAutomatically(id); }
+      catch (error) {
+        console.error('Chiusura stagione ' + id + ' non riuscita:', error);
+        if (stillAdmin()) message.textContent = (error.archiveWriteAttempted ? 'Archiviazione di ' + id + ' non completata' : 'Verifica della stagione ' + id + ' non riuscita') + ' (' + (error.code || 'errore di elaborazione') + '). Premi AGGIORNA per riprovare.';
+        return;
+      }
     }
-    message.textContent = 'Stagioni precedenti archiviate nella Hall of Fame.';
-  })().catch(error => {
-    console.error('Errore archiviazione stagioni:', error);
-    message.textContent = 'Archiviazione non completata. Verifica connessione e regole Firestore, poi premi AGGIORNA. I risultati dei mesi precedenti restano in sola lettura.';
-  }).finally(() => { seasonsCheckPromise = null; });
+    if (stillAdmin()) message.textContent = '';
+  })().finally(() => { seasonsCheckPromise = null; });
   return seasonsCheckPromise;
 }
 

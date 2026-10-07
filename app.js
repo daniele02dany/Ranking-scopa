@@ -3,8 +3,7 @@ const playerScreen = document.getElementById("playerScreen");
 const homeScreen = document.getElementById("homeScreen");
 const newMatchScreen =
   document.getElementById("newMatchScreen");
-  const rankingButton =
-  document.getElementById("rankingButton");
+
 
 const historyButton =
   document.getElementById("historyButton");
@@ -75,9 +74,9 @@ function showScreen(screen) {
 
 function updateNavigationState(screen = document.querySelector('.screen.active')) {
   const section = {
-    homeScreen: 'home', rankingScreen: 'ranking', historyScreen: 'history', hallOfFameScreen: 'history',
+    homeScreen: 'home', historyScreen: 'history', hallOfFameScreen: 'history',
     newMatchScreen: 'play', drawResultScreen: 'play',
-    playersScreen: 'players', playerProfileScreen: 'players',
+    playersScreen: 'players', playerProfileScreen: profileReturnTo,
     matchInProgressScreen: currentMatch?.status === 'completed' ? 'history' : 'play',
     resultScreen: resultMode === 'correction' ? 'history' : 'play'
   }[screen?.id];
@@ -148,10 +147,6 @@ function navigateTo(destination) {
     if (currentDraw) { showDraw(currentDraw); return; }
     if (!matchPlayerList.childElementCount) createMatchPlayerList();
     showScreen(newMatchScreen);
-  } else if (destination === 'ranking') {
-    rankingMonth.value = getSeasonId();
-    showScreen(document.getElementById('rankingScreen'));
-    refreshRanking();
   } else if (destination === 'history') {
     historyMonth.value = getSeasonId();
     showScreen(document.getElementById('historyScreen'));
@@ -456,13 +451,13 @@ const resultSaveMessage = document.getElementById('resultSaveMessage');
 const confirmResultButton = document.getElementById('confirmResultButton');
 const cancelResultButton = document.getElementById('cancelResultButton');
 const historyMonth = document.getElementById('historyMonth');
-const rankingMonth = document.getElementById('rankingMonth');
+
 let isClosingMatch = false;
 let resultMode = 'create';
 let correctionBasis = null;
 let homeRequest = 0;
 let historyRequest = 0;
-let rankingRequest = 0;
+
 
 function calculateResult(scoreA, scoreB) {
   if (!Number.isSafeInteger(scoreA) || !Number.isSafeInteger(scoreB) || scoreA < 0 || scoreB < 0) {
@@ -630,7 +625,7 @@ async function closeMatch(event) {
       ? 'Il risultato è stato modificato da un’altra scheda mentre lo correggevi. La tua correzione non è stata salvata. Qui vedi il risultato aggiornato: controllalo e premi CORREGGI RISULTATO se serve.'
       : saved.outcome === 'corrected' ? 'Correzione salvata. Scopa Points e storico aggiornati.'
       : saved.outcome === 'unchanged' ? 'Questo risultato è già stato salvato. Nessuna partita è stata conteggiata due volte.' : '';
-    await Promise.all([refreshHome(), refreshRanking(), refreshHistory(), refreshPlayers()]);
+    await Promise.all([refreshHome(), refreshHistory(), refreshPlayers()]);
   } catch (error) {
     console.error('Errore salvataggio risultato:', error);
     resultSaveMessage.textContent = error.code === 'permission-denied'
@@ -767,7 +762,11 @@ function renderRanking(container, rows, matches = [], compact = false) {
     previousRating = row.rating;
     const entry = textElement('article','','ranking-row');
     entry.appendChild(textElement('span',String(position),'rank-number'));
-    const person = textElement('div','','ranking-person');person.appendChild(createAvatar(row.name));
+    const person = textElement('button','','ranking-person ranking-profile-button');
+    person.type = 'button';
+    person.setAttribute('aria-label', 'Statistiche di ' + row.name);
+    person.addEventListener('click', () => openHomePlayerProfile(row.name, person));
+    person.appendChild(createAvatar(row.name));
     const identity = textElement('div','');identity.appendChild(playerIdentity(row.name,napoleon.get(row.name)));
     identity.appendChild(textElement('small',row.games ? row.games + (row.games === 1 ? ' partita' : ' partite') + ' · ' + row.wins + 'W - ' + row.losses + 'L' : 'Nessuna partita giocata'));person.appendChild(identity);entry.appendChild(person);
     const points = textElement('div','','points-block');points.appendChild(textElement('strong',String(row.rating)));
@@ -834,24 +833,6 @@ async function refreshHistory() {
   }
 }
 
-async function refreshRanking() {
-  if (!canUseAppClient()) return;
-  await ensurePreviousSeasonsClosed();
-  const request = ++rankingRequest;
-  const month = rankingMonth.value;
-  const message = document.getElementById('rankingMessage');
-  document.getElementById('rankingList').replaceChildren();
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) { message.textContent = 'Scegli un mese.'; return; }
-  message.textContent = 'Caricamento…';
-  try {
-    const matches = await loadSeasonMatches(month);
-    if (request !== rankingRequest) return;
-    renderRanking(document.getElementById('rankingList'), calculateRanking(matches), matches);
-    message.textContent = '';
-  } catch (error) {
-    if (request === rankingRequest) message.textContent = 'Impossibile caricare la classifica. Controlla la connessione e riprova.';
-  }
-}
 
 resultForm.addEventListener('submit', closeMatch);
 [scoreAInput,scoreBInput].forEach(input => input.addEventListener('input',updateResultPreview));
@@ -860,12 +841,9 @@ document.querySelectorAll('[data-go-home]').forEach(button => button.addEventLis
   navigateTo('home');
 }));
 document.getElementById('refreshHomeButton').addEventListener('click',refreshHome);
-rankingButton.addEventListener('click', () => navigateTo('ranking'));
 historyButton.addEventListener('click', () => navigateTo('history'));
 historyMonth.addEventListener('change', refreshHistory);
-rankingMonth.addEventListener('change', refreshRanking);
 document.getElementById('refreshHistoryButton').addEventListener('click',refreshHistory);
-document.getElementById('refreshRankingButton').addEventListener('click',refreshRanking);
 
 bottomNav.querySelectorAll('[data-nav]').forEach(button => button.addEventListener('click', () => navigateTo(button.dataset.nav)));
 document.getElementById('resumeResultButton').addEventListener('click',resumeResultForm);
@@ -875,6 +853,7 @@ const profileMonth = document.getElementById('profileMonth');
 let playersRequest = 0;
 let playersSeasonData = null;
 let profilePlayerName = null;
+let profileReturnTo = 'players';
 
 async function refreshPlayers() {
   if (!canUseAppClient()) return;
@@ -918,8 +897,26 @@ async function refreshPlayers() {
   }
 }
 
-function openPlayerProfile(name) {
+async function openHomePlayerProfile(name, button) {
+  if (!canUseAppClient() || !homeScreen.classList.contains('active')) return;
+  const uid = auth.currentUser?.uid;
+  button.disabled = true;
+  playersMonth.value = getSeasonId();
+  try {
+    await refreshPlayers();
+    if (!canUseAppClient() || auth.currentUser?.uid !== uid || !homeScreen.classList.contains('active')) return;
+    if (!playersSeasonData || playersSeasonData.seasonId !== getSeasonId() || document.getElementById('playersMessage').textContent) {
+      document.getElementById('homeDataMessage').textContent = 'Impossibile caricare le statistiche. Riprova.';
+      return;
+    }
+    openPlayerProfile(name, 'home');
+  } finally { button.disabled = false; }
+}
+
+function openPlayerProfile(name, origin = 'players') {
   if (!playersSeasonData) return;
+  profileReturnTo = origin;
+  document.getElementById('backToPlayersButton').textContent = origin === 'home' ? '← TORNA ALLA HOME' : '← TUTTI I GIOCATORI';
   profilePlayerName = name;
   profileMonth.value = playersSeasonData.seasonId;
   renderPlayerProfile();
@@ -962,7 +959,7 @@ profileMonth.addEventListener('change', () => {
 });
 document.getElementById('refreshPlayersButton').addEventListener('click',refreshPlayers);
 document.getElementById('refreshProfileButton').addEventListener('click',refreshPlayers);
-document.getElementById('backToPlayersButton').addEventListener('click',() => navigateTo('players'));
+document.getElementById('backToPlayersButton').addEventListener('click',() => navigateTo(profileReturnTo));
 
 
 // Archived seasons are read-only snapshots, independent of the live Scopa Points ranking.
@@ -1098,8 +1095,8 @@ function syncCurrentSeason() {
   const seasonId = getSeasonId();
   if (observedSeasonId !== seasonId) {
     observedSeasonId = seasonId;
-    [historyMonth, rankingMonth, playersMonth, profileMonth].forEach(input => input.value = seasonId);
-    homeRequest++; historyRequest++; rankingRequest++; playersRequest++;
+    [historyMonth, playersMonth, profileMonth].forEach(input => input.value = seasonId);
+    homeRequest++; historyRequest++; playersRequest++;
     playersSeasonData = null;
     // Keep drafts available for inspection; save is denied for an expired month.
     matchAccess = {id: null, editable: false};
@@ -1252,7 +1249,7 @@ async function cancelMatchResult() {
     await openMatch(saved);
     notice.textContent = 'Risultato annullato. La partita è di nuovo in corso.';
     // Refresh hidden views too: no old statistics remain after a local cancellation.
-    await Promise.all([refreshHome(), refreshRanking(), refreshHistory(), refreshPlayers()]);
+    await Promise.all([refreshHome(), refreshHistory(), refreshPlayers()]);
   } catch (error) {
     notice.textContent = error.code === 'permission-denied'
       ? 'Annullamento non autorizzato. Verifica che il mese sia aperto e che le nuove regole siano pubblicate.'
@@ -1278,7 +1275,6 @@ document.addEventListener('visibilitychange', () => {
     const screen = document.querySelector('.screen.active')?.id;
     syncCurrentSeason();
     refreshHome();
-    if (screen === 'rankingScreen') refreshRanking();
     if (screen === 'historyScreen') refreshHistory();
     if (screen === 'playersScreen' || screen === 'playerProfileScreen') refreshPlayers();
     if (screen === 'hallOfFameScreen') refreshHallOfFame();
@@ -2312,7 +2308,7 @@ async function confirmPermanentMatchDeletion() {
     currentMatch = null;matchAccess = {id:null,editable:false};correctionBasis = null;
     playersSeasonData = null;
     showScreen(homeScreen);
-    await Promise.all([refreshHome(),refreshHistory(),refreshRanking(),refreshPlayers()]);
+    await Promise.all([refreshHome(),refreshHistory(),refreshPlayers()]);
     document.getElementById('seasonLifecycleMessage').textContent = outcome === 'missing' ? 'Partita già eliminata.' : 'Partita eliminata definitivamente.';
   } catch (error) {
     document.getElementById('deleteMatchMessage').textContent = error.code === 'permission-denied'
@@ -2385,10 +2381,10 @@ function clearPrivateSession() {
   allPlayers = [];availablePlayers = [];rawPlayerDocuments = [];rosterLoaded = false;
   currentDraw = null;currentMatch = null;pausedResult = null;playersSeasonData = null;
   historyMatches = [];playerCareerMatches = [];playerCareerSeasons = null;
-  homeRequest++;historyRequest++;rankingRequest++;playersRequest++;hallOfFameRequest++;matchDetailRequest++;
+  homeRequest++;historyRequest++;playersRequest++;hallOfFameRequest++;matchDetailRequest++;
   avatarCache.clear();avatarObserver?.disconnect();
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
-  for (const id of ['rankingList','historyList','recentMatchesPreview','openMatches','homePodium','playersDirectory','playerAdminList','seasonPalmares','closedSeasonsList','profileContent','accessRequestsList','membersList']) {
+  for (const id of ['historyList','recentMatchesPreview','openMatches','homePodium','playersDirectory','playerAdminList','seasonPalmares','closedSeasonsList','profileContent','accessRequestsList','membersList']) {
     // Keep the static profile structure intact for a later reauthorization.
     if (id === 'profileContent') document.getElementById(id).hidden = true;
     else document.getElementById(id)?.replaceChildren();

@@ -76,10 +76,6 @@
     <p id="homeRankingMonth" class="small-label"></p>
     <div id="homePodium" class="home-ranking"></div>
 
-    <button id="rankingButton" class="secondary-button">
-      VEDI CLASSIFICA
-    </button>
-
   </div>
 
 
@@ -251,7 +247,7 @@
   <div class="brand-bar" aria-label="Ranking Scopa"><span>Ranking Scopa</span><span class="brand-mark" aria-hidden="true">RS</span></div>
   <p class="small-label">IL REGISTRO DEL TAVOLO</p>
   <h2>Le partite.</h2>
-  <button id="hallOfFameButton" class="primary-button hall-of-fame-entry" type="button">ALBO D’ORO</button>
+  <button id="hallOfFameButton" class="primary-button hall-of-fame-entry" type="button">Hall of Fame</button>
   <label class="month-label" for="historyMonth">Mese della partita</label>
   <input id="historyMonth" class="month-input" type="month">
   <button id="refreshHistoryButton" class="secondary-button">AGGIORNA</button>
@@ -264,7 +260,7 @@
 <section id="hallOfFameScreen" class="screen">
   <div class="brand-bar" aria-label="Ranking Scopa"><span>Ranking Scopa</span><span class="brand-mark" aria-hidden="true">RS</span></div>
   <p class="small-label">LE STAGIONI CONCLUSE</p>
-  <h2>L’albo d’oro.</h2>
+  <h2>Hall of Fame</h2>
   <button id="backToHistoryButton" class="secondary-button" type="button">← TORNA ALLO STORICO</button>
   <button id="refreshHallOfFameButton" class="secondary-button" type="button">AGGIORNA</button>
   <p id="hallOfFameMessage" class="match-message" role="status" aria-live="polite"></p>
@@ -277,17 +273,7 @@
   </div>
 </section>
 
-<section id="rankingScreen" class="screen">
-  <div class="brand-bar" aria-label="Ranking Scopa"><span>Ranking Scopa</span><span class="brand-mark" aria-hidden="true">RS</span></div>
-  <p class="small-label">SCOPA POINTS</p>
-  <h2>La classifica.</h2>
-  <label class="month-label" for="rankingMonth">Mese della classifica</label>
-  <input id="rankingMonth" class="month-input" type="month">
-  <button id="refreshRankingButton" class="secondary-button">AGGIORNA</button>
-  <p id="rankingMessage" class="match-message" role="status"></p>
-  <div id="rankingList"></div>
-  <button class="secondary-button" data-go-home>TORNA ALLA HOME</button>
-</section>
+
 
 <section id="playersScreen" class="screen">
   <div class="brand-bar" aria-label="Ranking Scopa"><span>Ranking Scopa</span><span class="brand-mark" aria-hidden="true">RS</span></div>
@@ -435,10 +421,6 @@
     <button type="button" data-nav="home">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7M5 9v12h5v-7h4v7h5V9"/></svg>
       <span>Home</span>
-    </button>
-    <button type="button" data-nav="ranking">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21V11h6v10M9 21V4h6v17M15 21v-7h6v7M2 21h20"/></svg>
-      <span>Classifica</span>
     </button>
     <button type="button" data-nav="play" aria-label="Nuova partita">
       <span class="nav-play-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>

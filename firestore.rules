@@ -90,43 +90,36 @@ service cloud.firestore {
     }
     function validName(value) { return value is string && value.trim().size() > 0 && value.size() <= 200; }
 
-    function validAwardItem(items, index) {
-      return items.size() <= index || validName(items[index]);
+    // Stop at the actual list length. Evaluating 32 helper calls for each
+    // of three lists exceeded the 1000-expression Rules budget even for a small podium.
+    // Fixed-size blocks keep expression nesting and function depth bounded.
+    function validAwardsFrom0(items) {
+      return (items.size() <= 0 || (validName(items[0]) && (items.size() <= 1 || (validName(items[1]) && (items.size() <= 2 || (validName(items[2]) && (items.size() <= 3 || (validName(items[3]) && validAwardsFrom4(items)))))))));
+    }
+    function validAwardsFrom4(items) {
+      return (items.size() <= 4 || (validName(items[4]) && (items.size() <= 5 || (validName(items[5]) && (items.size() <= 6 || (validName(items[6]) && (items.size() <= 7 || (validName(items[7]) && validAwardsFrom8(items)))))))));
+    }
+    function validAwardsFrom8(items) {
+      return (items.size() <= 8 || (validName(items[8]) && (items.size() <= 9 || (validName(items[9]) && (items.size() <= 10 || (validName(items[10]) && (items.size() <= 11 || (validName(items[11]) && validAwardsFrom12(items)))))))));
+    }
+    function validAwardsFrom12(items) {
+      return (items.size() <= 12 || (validName(items[12]) && (items.size() <= 13 || (validName(items[13]) && (items.size() <= 14 || (validName(items[14]) && (items.size() <= 15 || (validName(items[15]) && validAwardsFrom16(items)))))))));
+    }
+    function validAwardsFrom16(items) {
+      return (items.size() <= 16 || (validName(items[16]) && (items.size() <= 17 || (validName(items[17]) && (items.size() <= 18 || (validName(items[18]) && (items.size() <= 19 || (validName(items[19]) && validAwardsFrom20(items)))))))));
+    }
+    function validAwardsFrom20(items) {
+      return (items.size() <= 20 || (validName(items[20]) && (items.size() <= 21 || (validName(items[21]) && (items.size() <= 22 || (validName(items[22]) && (items.size() <= 23 || (validName(items[23]) && validAwardsFrom24(items)))))))));
+    }
+    function validAwardsFrom24(items) {
+      return (items.size() <= 24 || (validName(items[24]) && (items.size() <= 25 || (validName(items[25]) && (items.size() <= 26 || (validName(items[26]) && (items.size() <= 27 || (validName(items[27]) && validAwardsFrom28(items)))))))));
+    }
+    function validAwardsFrom28(items) {
+      return (items.size() <= 28 || (validName(items[28]) && (items.size() <= 29 || (validName(items[29]) && (items.size() <= 30 || (validName(items[30]) && (items.size() <= 31 || (validName(items[31]) && true))))))));
     }
     function validAwards(items) {
       return items is list && items.size() <= 32 && items.toSet().size() == items.size()
-        && validAwardItem(items, 0)
-        && validAwardItem(items, 1)
-        && validAwardItem(items, 2)
-        && validAwardItem(items, 3)
-        && validAwardItem(items, 4)
-        && validAwardItem(items, 5)
-        && validAwardItem(items, 6)
-        && validAwardItem(items, 7)
-        && validAwardItem(items, 8)
-        && validAwardItem(items, 9)
-        && validAwardItem(items, 10)
-        && validAwardItem(items, 11)
-        && validAwardItem(items, 12)
-        && validAwardItem(items, 13)
-        && validAwardItem(items, 14)
-        && validAwardItem(items, 15)
-        && validAwardItem(items, 16)
-        && validAwardItem(items, 17)
-        && validAwardItem(items, 18)
-        && validAwardItem(items, 19)
-        && validAwardItem(items, 20)
-        && validAwardItem(items, 21)
-        && validAwardItem(items, 22)
-        && validAwardItem(items, 23)
-        && validAwardItem(items, 24)
-        && validAwardItem(items, 25)
-        && validAwardItem(items, 26)
-        && validAwardItem(items, 27)
-        && validAwardItem(items, 28)
-        && validAwardItem(items, 29)
-        && validAwardItem(items, 30)
-        && validAwardItem(items, 31);
+        && validAwardsFrom0(items);
     }
 
     match /admins/{uid} {
@@ -263,50 +256,43 @@ service cloud.firestore {
 
     match /seasons/{seasonId} {
       // Rules cannot iterate arbitrary lists. Validate up to 32 entries explicitly;
-      // this covers all tied players in the current roster, without truncation.
+      // Never truncate tied players; the overall Rules expression budget still applies.
       function validPodiumItem(items, index) {
-        return items.size() <= index || (items[index] is map
-          && items[index].keys().hasAll(['position', 'player'])
-          && items[index].keys().hasOnly(['position', 'player'])
-          && items[index].position is int && items[index].position >= 1 && items[index].position <= 3
-          && validName(items[index].player));
+        let entry = items[index];
+        return entry is map
+          && entry.keys().hasOnly(['position', 'player'])
+          && entry.position is int && entry.position >= 1 && entry.position <= 3
+          && validName(entry.player);
+      }
+      function validPodiumFrom0(items) {
+        return (items.size() <= 0 || (validPodiumItem(items, 0) && (items.size() <= 1 || (validPodiumItem(items, 1) && (items.size() <= 2 || (validPodiumItem(items, 2) && (items.size() <= 3 || (validPodiumItem(items, 3) && validPodiumFrom4(items)))))))));
+      }
+      function validPodiumFrom4(items) {
+        return (items.size() <= 4 || (validPodiumItem(items, 4) && (items.size() <= 5 || (validPodiumItem(items, 5) && (items.size() <= 6 || (validPodiumItem(items, 6) && (items.size() <= 7 || (validPodiumItem(items, 7) && validPodiumFrom8(items)))))))));
+      }
+      function validPodiumFrom8(items) {
+        return (items.size() <= 8 || (validPodiumItem(items, 8) && (items.size() <= 9 || (validPodiumItem(items, 9) && (items.size() <= 10 || (validPodiumItem(items, 10) && (items.size() <= 11 || (validPodiumItem(items, 11) && validPodiumFrom12(items)))))))));
+      }
+      function validPodiumFrom12(items) {
+        return (items.size() <= 12 || (validPodiumItem(items, 12) && (items.size() <= 13 || (validPodiumItem(items, 13) && (items.size() <= 14 || (validPodiumItem(items, 14) && (items.size() <= 15 || (validPodiumItem(items, 15) && validPodiumFrom16(items)))))))));
+      }
+      function validPodiumFrom16(items) {
+        return (items.size() <= 16 || (validPodiumItem(items, 16) && (items.size() <= 17 || (validPodiumItem(items, 17) && (items.size() <= 18 || (validPodiumItem(items, 18) && (items.size() <= 19 || (validPodiumItem(items, 19) && validPodiumFrom20(items)))))))));
+      }
+      function validPodiumFrom20(items) {
+        return (items.size() <= 20 || (validPodiumItem(items, 20) && (items.size() <= 21 || (validPodiumItem(items, 21) && (items.size() <= 22 || (validPodiumItem(items, 22) && (items.size() <= 23 || (validPodiumItem(items, 23) && validPodiumFrom24(items)))))))));
+      }
+      function validPodiumFrom24(items) {
+        return (items.size() <= 24 || (validPodiumItem(items, 24) && (items.size() <= 25 || (validPodiumItem(items, 25) && (items.size() <= 26 || (validPodiumItem(items, 26) && (items.size() <= 27 || (validPodiumItem(items, 27) && validPodiumFrom28(items)))))))));
+      }
+      function validPodiumFrom28(items) {
+        return (items.size() <= 28 || (validPodiumItem(items, 28) && (items.size() <= 29 || (validPodiumItem(items, 29) && (items.size() <= 30 || (validPodiumItem(items, 30) && (items.size() <= 31 || (validPodiumItem(items, 31) && true))))))));
       }
       function validPodium(items) {
         return items is list && items.size() <= 32
           && (items.size() == 0 || items[0].position == 1)
           && items.toSet().size() == items.size()
-          && validPodiumItem(items, 0)
-          && validPodiumItem(items, 1)
-          && validPodiumItem(items, 2)
-          && validPodiumItem(items, 3)
-          && validPodiumItem(items, 4)
-          && validPodiumItem(items, 5)
-          && validPodiumItem(items, 6)
-          && validPodiumItem(items, 7)
-          && validPodiumItem(items, 8)
-          && validPodiumItem(items, 9)
-          && validPodiumItem(items, 10)
-          && validPodiumItem(items, 11)
-          && validPodiumItem(items, 12)
-          && validPodiumItem(items, 13)
-          && validPodiumItem(items, 14)
-          && validPodiumItem(items, 15)
-          && validPodiumItem(items, 16)
-          && validPodiumItem(items, 17)
-          && validPodiumItem(items, 18)
-          && validPodiumItem(items, 19)
-          && validPodiumItem(items, 20)
-          && validPodiumItem(items, 21)
-          && validPodiumItem(items, 22)
-          && validPodiumItem(items, 23)
-          && validPodiumItem(items, 24)
-          && validPodiumItem(items, 25)
-          && validPodiumItem(items, 26)
-          && validPodiumItem(items, 27)
-          && validPodiumItem(items, 28)
-          && validPodiumItem(items, 29)
-          && validPodiumItem(items, 30)
-          && validPodiumItem(items, 31);
+          && validPodiumFrom0(items);
       }
       function validClosure() {
         let data = request.resource.data;

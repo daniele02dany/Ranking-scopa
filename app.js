@@ -63,7 +63,8 @@ let currentMatch = null;
 
 function showScreen(screen) {
   if (!canUseAppClient()) screen = document.getElementById('accessScreen');
-  if (screen.id !== 'accessScreen' && selectionNeedsChange && screen !== playerScreen && !(isCurrentUserAdmin() && screen.id === 'playersScreen')) screen = playerScreen;
+  if (screen.id === 'adminScreen' && !isCurrentUserAdmin()) screen = getCurrentPlayerName() ? homeScreen : playerScreen;
+  if (screen.id !== 'accessScreen' && selectionNeedsChange && screen !== playerScreen && !(isCurrentUserAdmin() && screen.id === 'adminScreen')) screen = playerScreen;
   document.querySelectorAll('.screen').forEach(item => item.classList.remove('active'));
   screen.classList.add("active");
   updateNavigationState(screen);
@@ -76,7 +77,7 @@ function updateNavigationState(screen = document.querySelector('.screen.active')
   const section = {
     homeScreen: 'home', historyScreen: 'history', hallOfFameScreen: 'history',
     newMatchScreen: 'play', drawResultScreen: 'play',
-    playersScreen: 'players', playerProfileScreen: profileReturnTo,
+    adminScreen: 'home', playerProfileScreen: profileReturnTo,
     matchInProgressScreen: currentMatch?.status === 'completed' ? 'history' : 'play',
     resultScreen: resultMode === 'correction' ? 'history' : 'play'
   }[screen?.id];
@@ -154,11 +155,8 @@ function navigateTo(destination) {
   } else if (destination === 'hallOfFame') {
     showScreen(document.getElementById('hallOfFameScreen'));
     refreshHallOfFame();
-  } else if (destination === 'players') {
-    playersMonth.value = getSeasonId();
-    showScreen(document.getElementById('playersScreen'));
-    refreshPlayers();
-    refreshAccessManagement();
+  } else if (destination === 'admin') {
+    openAdminPanel();
   }
 }
 
@@ -853,7 +851,7 @@ const profileMonth = document.getElementById('profileMonth');
 let playersRequest = 0;
 let playersSeasonData = null;
 let profilePlayerName = null;
-let profileReturnTo = 'players';
+let profileReturnTo = 'home';
 
 async function refreshPlayers() {
   if (!canUseAppClient()) return;
@@ -913,7 +911,7 @@ async function openHomePlayerProfile(name, button) {
   } finally { button.disabled = false; }
 }
 
-function openPlayerProfile(name, origin = 'players') {
+function openPlayerProfile(name, origin = 'home') {
   if (!playersSeasonData) return;
   profileReturnTo = origin;
   document.getElementById('backToPlayersButton').textContent = origin === 'home' ? '← TORNA ALLA HOME' : '← TUTTI I GIOCATORI';
@@ -957,7 +955,7 @@ profileMonth.addEventListener('change', () => {
   playersMonth.value = profileMonth.value;
   refreshPlayers();
 });
-document.getElementById('refreshPlayersButton').addEventListener('click',refreshPlayers);
+
 document.getElementById('refreshProfileButton').addEventListener('click',refreshPlayers);
 document.getElementById('backToPlayersButton').addEventListener('click',() => navigateTo(profileReturnTo));
 
@@ -1276,7 +1274,7 @@ document.addEventListener('visibilitychange', () => {
     syncCurrentSeason();
     refreshHome();
     if (screen === 'historyScreen') refreshHistory();
-    if (screen === 'playersScreen' || screen === 'playerProfileScreen') refreshPlayers();
+    if (screen === 'adminScreen' || screen === 'playerProfileScreen') refreshPlayers();
     if (screen === 'hallOfFameScreen') refreshHallOfFame();
     if (screen === 'matchInProgressScreen' && currentMatch) openMatch(currentMatch);
     if (screen === 'resultScreen') updateResultPreview();
@@ -1918,6 +1916,7 @@ async function migratePlayersToStableIds() {
 
 function renderPlayerManagement() {
   const admin = isCurrentUserAdmin();
+  syncAdminControls();
   document.getElementById('playerManagement').hidden = !admin;
   document.getElementById('accessManagement').hidden = !admin;
   document.getElementById('setupManagementButton').hidden = !admin;
@@ -2035,7 +2034,7 @@ document.querySelectorAll('[data-close-player-dialog]').forEach(button => button
 }));
 document.getElementById('setupManagementButton').addEventListener('click',() => {
   if (!isCurrentUserAdmin()) return;
-  syncCurrentSeason(); showScreen(document.getElementById('playersScreen')); refreshPlayers(); refreshAccessManagement();
+  openAdminPanel();
 });
 document.getElementById('refreshRosterButton').addEventListener('click',async() => {
   try { await loadAdminStatus(); await refreshRosterFromServer(); }
@@ -2376,6 +2375,7 @@ function showAccessScreen(message, disabled = false) {
   showScreen(document.getElementById('accessScreen'));
 }
 function clearPrivateSession() {
+  stopAdminRequests();
   document.getElementById('seasonLifecycleMessage').textContent = '';
   if (stopPlayersListener) stopPlayersListener();stopPlayersListener = null;rosterSubscriptionUid = null;
   allPlayers = [];availablePlayers = [];rawPlayerDocuments = [];rosterLoaded = false;
@@ -2513,6 +2513,7 @@ async function refreshAccessManagement() {
   try {
     const [requests,members]=await Promise.all([db.collection('accessRequests').get({source:'server'}),db.collection('members').get({source:'server'})]);
     if (!isCurrentUserAdmin() || auth.currentUser?.uid!==uid) return;
+    updateAdminRequestBadge(requests);
     const list=document.getElementById('accessRequestsList'),devices=document.getElementById('membersList');list.replaceChildren();devices.replaceChildren();
     requests.forEach(doc=>{
       const data=doc.data(),row=textElement('div','','access-admin-row');
@@ -2596,4 +2597,56 @@ document.getElementById('cancelUnlinkDevice').addEventListener('click',()=>{
 });
 document.getElementById('unlinkDeviceDialog').addEventListener('cancel',event=>{
   if(unlinkDeviceBusy)event.preventDefault();else unlinkDeviceTarget=null;
+});
+
+// Admin navigation and pending requests: presentation only; Firestore remains authoritative.
+let adminRequestsStop = null, adminRequestsUid = null, adminRequestsEpoch = 0;
+function paintAdminRequestCount(count) {
+  document.querySelectorAll('[data-admin-entry]').forEach(button => {
+    const badge = button.querySelector('.admin-request-badge');
+    badge.textContent = String(count); badge.hidden = count === 0;
+    button.setAttribute('aria-label', count ? 'Pannello Admin, ' + count + ' richieste in attesa' : 'Pannello Admin');
+  });
+}
+function updateAdminRequestBadge(snapshot) {
+  let count = 0; snapshot.forEach(() => count++); paintAdminRequestCount(count);
+}
+function stopAdminRequests() {
+  adminRequestsEpoch++; adminRequestsStop?.(); adminRequestsStop = null; adminRequestsUid = null;
+  paintAdminRequestCount(0);
+  document.querySelectorAll('[data-admin-entry]').forEach(button => button.hidden = true);
+}
+function syncAdminControls() {
+  const allowed = isCurrentUserAdmin() && canUseAppClient();
+  document.querySelectorAll('[data-admin-entry]').forEach(button => button.hidden = !allowed);
+  if (!allowed) {
+    stopAdminRequests();
+    if (document.getElementById('adminScreen').classList.contains('active')) showScreen(getCurrentPlayerName() ? homeScreen : playerScreen);
+    return;
+  }
+  const uid = auth.currentUser.uid;
+  if (adminRequestsUid === uid) return;
+  stopAdminRequests(); adminRequestsUid = uid;
+  document.querySelectorAll('[data-admin-entry]').forEach(button => button.hidden = false);
+  const epoch = adminRequestsEpoch;
+  adminRequestsStop = db.collection('accessRequests').onSnapshot({includeMetadataChanges:true}, snapshot => {
+    if (epoch !== adminRequestsEpoch || auth.currentUser?.uid !== uid || !isCurrentUserAdmin() || snapshot.metadata?.fromCache) return;
+    updateAdminRequestBadge(snapshot);
+  }, () => { if (epoch === adminRequestsEpoch) paintAdminRequestCount(0); });
+}
+function openAdminPanel() {
+  if (!canUseAppClient() || !isCurrentUserAdmin() || isDrawing || isCreatingMatch || isClosingMatch) return;
+  pauseResultForm();
+  showScreen(document.getElementById('adminScreen'));
+  renderPlayerManagement(); refreshAccessManagement();
+}
+document.querySelectorAll('.brand-bar').forEach(header => {
+  const button = textElement('button', '', 'admin-entry'); button.type = 'button'; button.hidden = true;
+  button.setAttribute('data-admin-entry', ''); button.setAttribute('aria-label', 'Pannello Admin');
+  button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4 5 8 8 9 3-1 8-5 8-9V6Z"/><path d="M9 12l2 2 4-4"/></svg><span class="admin-request-badge" hidden></span>';
+  button.addEventListener('click', openAdminPanel);
+  header.insertBefore(button, header.querySelector('.brand-mark'));
+});
+document.getElementById('backFromAdminButton').addEventListener('click', () => {
+  if (getCurrentPlayerName()) navigateTo('home'); else showScreen(playerScreen);
 });

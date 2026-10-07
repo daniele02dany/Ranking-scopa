@@ -44,7 +44,7 @@
       <p id="playerSetupMessage" class="scoring-rule"></p>
       <div id="playerList" class="player-list"></div>
       <button id="refreshRosterButton" class="secondary-button" type="button">AGGIORNA</button>
-      <button id="setupManagementButton" class="secondary-button" type="button" hidden>GESTIONE GIOCATORI</button>
+      <button id="setupManagementButton" class="secondary-button" type="button" hidden>PANNELLO ADMIN</button>
     </section>
 
 
@@ -275,16 +275,12 @@
 
 
 
-<section id="playersScreen" class="screen">
+<section id="adminScreen" class="screen">
   <div class="brand-bar" aria-label="Ranking Scopa"><span>Ranking Scopa</span><span class="brand-mark" aria-hidden="true">RS</span></div>
-  <p class="small-label">IL GRUPPO</p>
-  <h2>Il circolo.</h2>
-  <label class="month-label" for="playersMonth">Mese delle statistiche</label>
-  <input id="playersMonth" class="month-input" type="month">
-  <p class="scoring-rule">Scegli un giocatore per vedere Scopa Points e risultati del mese.</p>
-  <button id="refreshPlayersButton" class="secondary-button">AGGIORNA</button>
-  <p id="playersMessage" class="match-message" role="status"></p>
-  <div id="playersDirectory" class="players-directory"></div>
+  <p class="small-label">GESTIONE DEL CIRCOLO</p>
+  <h2>Pannello Admin</h2>
+  <div hidden><input id="playersMonth" type="month"><p id="playersMessage"></p><div id="playersDirectory"></div></div>
+  <button id="backFromAdminButton" class="secondary-button" type="button">← TORNA ALLA HOME</button>
   <section id="playerManagement" class="profile-career-card" hidden aria-labelledby="playerManagementTitle">
     <section id="accessManagement" hidden>
       <h3>RICHIESTE ACCESSO</h3><div id="accessRequestsList"></div>
@@ -429,10 +425,6 @@
     <button type="button" data-nav="history">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10a9 9 0 1 1 1 8M3 4v6h6M12 7v6l4 2"/></svg>
       <span>Storico</span>
-    </button>
-    <button type="button" data-nav="players">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M2 21v-3a7 7 0 0 1 14 0v3M17 4a3 3 0 0 1 0 6M18 14a5 5 0 0 1 4 5v2"/></svg>
-      <span>Giocatori</span>
     </button>
   </nav>
 

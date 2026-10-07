@@ -1,5 +1,5 @@
 /* Bump VERSION whenever ANY shell asset changes; deploy the complete release together. */
-const VERSION = 'v3';
+const VERSION = 'v4';
 const PREFIX = 'ranking-scopa-static-' + encodeURIComponent(new URL('./', self.location.href).pathname) + '-';
 const CACHE = PREFIX + VERSION;
 const ROOT = new URL('./', self.location.href);

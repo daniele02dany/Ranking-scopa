@@ -54,7 +54,7 @@
   <div class="home-header member-pass">
     <div class="pass-heading"><span>RANKING SCOPA</span><span>MEMBER PASS</span></div>
     <div id="homeAvatar"></div>
-    <div class="pass-player"><p class="small-label">IL TUO TAVOLO</p><h2 id="welcomePlayerName">GIOCATORE</h2></div>
+    <div class="pass-player"><p class="small-label">IL TUO PASS</p><h2 id="welcomePlayerName">GIOCATORE</h2></div>
     <p id="homePlayerSummary" class="home-player-summary"></p>
     <div class="pass-footer"><span>MEMBER / PLAYER</span><div id="homeSeason" class="season-badge"></div></div>
   </div>
@@ -294,36 +294,41 @@
 
 <section id="playerProfileScreen" class="screen">
   <div class="brand-bar" aria-label="Ranking Scopa"><span>Ranking Scopa</span><span class="brand-mark" aria-hidden="true">RS</span></div>
-  <div class="profile-heading"><div id="profileAvatar"></div><div><p class="small-label">IL GIOCATORE</p><h2 id="profileName"></h2><p id="profileInactiveBadge" class="inactive-badge" hidden>INATTIVO</p></div></div>
   <label class="month-label" for="profileMonth">Mese delle statistiche</label>
   <input id="profileMonth" class="month-input" type="month">
   <button id="refreshProfileButton" class="secondary-button">AGGIORNA</button>
   <p id="profileMessage" class="match-message" role="status"></p>
   <div id="profileContent" hidden>
-    <div class="profile-rating-card">
-      <p class="small-label">SCOPA POINTS ATTUALI</p>
-      <strong id="profileRating"></strong>
-      <p id="profilePosition"></p>
-      <p id="profileChange"></p>
-    </div>
+    <section class="member-pass player-member-pass" aria-label="Member Pass giocatore">
+      <div class="pass-heading"><span>RANKING SCOPA</span><span>MEMBER PASS ♦</span></div>
+  <div class="profile-heading"><div id="profileAvatar"></div><div><p class="small-label">MEMBER / PLAYER</p><h2 id="profileName"></h2><p id="profileInactiveBadge" class="inactive-badge" hidden>INATTIVO</p></div></div>
+
+      <p id="profilePassSeason" class="small-label"></p>
+      <div class="pass-points"><span>Scopa Points</span><strong id="profileRating"></strong></div>
+      <p id="profilePassRecord"></p><p id="profilePosition"></p><p id="profileChange"></p>
+      <span class="pass-monogram" aria-hidden="true">RS</span>
+    </section>
+    <section class="sp-summary" aria-label="Riepilogo Scopa Points">
+      <h3>SCOPA POINTS</h3><strong id="profileTotalPoints"></strong>
+      <dl class="sp-summary-grid"><div><dt>Base mensile</dt><dd>1.000 SP</dd></div><div><dt>Punti risultati</dt><dd id="profileResultPoints"></dd></div><div><dt>Bonus partite</dt><dd id="profileParticipationBonus"></dd></div></dl>
+    </section>
     <div id="profileWinStreak"></div>
     <div id="profileNapoleonEmblem" hidden></div>
     <h3 class="profile-history-title">PERFORMANCE</h3>
     <dl class="profile-stat-grid">
       <div><dt>Record Scopa Points</dt><dd id="profilePeakScopaPoints"></dd></div>
-      <div><dt>Streak attuale</dt><dd id="profileStreak"></dd></div>
-      <div><dt>Forma ultime 5</dt><dd id="profileForm" class="recent-form"></dd></div>
+      <div><dt>Serie attuale</dt><dd id="profileStreak"></dd></div>
+      <div><dt>Ultime 5</dt><dd id="profileForm" class="recent-form"></dd></div>
       <div><dt>Napoleoni del mese</dt><dd id="profileNapoleons"></dd></div>
       <div><dt>Partite</dt><dd id="profileGames"></dd></div>
-      <div><dt>Bonus partecipazione</dt><dd id="profileParticipationBonus"></dd></div>
-      <div><dt>Vittorie</dt><dd id="profileWins"></dd></div>
-      <div><dt>Sconfitte</dt><dd id="profileLosses"></dd></div>
-      <div><dt>Vittorie %</dt><dd id="profileWinRate"></dd></div>
+      <div><dt>Vinte</dt><dd id="profileWins"></dd></div>
+      <div><dt>Perse</dt><dd id="profileLosses"></dd></div>
+      <div><dt>Win rate</dt><dd id="profileWinRate"></dd></div>
     </dl>
 
     <details class="profile-details" open><summary>RECORD</summary><dl id="profileRecords" class="profile-detail-list"></dl></details>
     <details class="profile-details" open><summary>COMPAGNI &amp; RIVALI</summary><dl id="profileCompanions" class="profile-detail-list"></dl></details>
-    <details class="profile-details"><summary>PARTITE DEL MESE</summary><div id="profileMatches"></div></details>
+    <section class="player-movements"><h3>LE SUE PARTITE</h3><p class="muted">Movimenti SP · Apri una partita per separare risultato e bonus.</p><div id="profileMatches"></div></section>
   </div>
   <section class="profile-career-card" aria-labelledby="profileCareerTitle">
     <h3 id="profileCareerTitle">PALMARÈS</h3>

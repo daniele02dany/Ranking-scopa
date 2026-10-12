@@ -766,7 +766,7 @@ function renderRanking(container, rows, matches = [], compact = false) {
     person.addEventListener('click', () => openHomePlayerProfile(row.name, person));
     person.appendChild(createAvatar(row.name));
     const identity = textElement('div','');identity.appendChild(playerIdentity(row.name,napoleon.get(row.name)));
-    identity.appendChild(textElement('small',row.games ? row.games + (row.games === 1 ? ' partita' : ' partite') + ' · ' + row.wins + 'W - ' + row.losses + 'L' : 'Nessuna partita giocata'));person.appendChild(identity);entry.appendChild(person);
+    identity.appendChild(textElement('small',row.games ? row.wins + 'V - ' + row.losses + 'P · ' + formatPlayerWinRate(row) : '0V - 0P · —'));person.appendChild(identity);entry.appendChild(person);
     const points = textElement('div','','points-block');points.appendChild(textElement('strong',String(row.rating)));
     points.appendChild(textElement('small','SP'));points.setAttribute('aria-label',row.rating + ' Scopa Points');entry.appendChild(points);
     if (!compact) entry.appendChild(createWinRate(row));
@@ -940,8 +940,7 @@ function renderPlayerProfile() {
   document.getElementById('profileParticipationBonus').textContent = '+' + (row.participationBonus ?? 0) + ' SP';
   document.getElementById('profileWins').textContent = row.wins;
   document.getElementById('profileLosses').textContent = row.losses;
-  document.getElementById('profileWinRate').textContent = row.games
-    ? `${(row.wins / row.games * 100).toLocaleString('it-IT', {maximumFractionDigits:1})}%` : '—';
+  document.getElementById('profileWinRate').textContent = formatPlayerWinRate(row);
   const played = matches.filter(match => match.status === 'completed'
     && (match.teamA.includes(row.name) || match.teamB.includes(row.name)));
   renderMatches(document.getElementById('profileMatches'), played, 'Nessuna partita conclusa per questo giocatore nel mese scelto.');
@@ -2067,6 +2066,9 @@ function renderTeam(container, match, team) {
     container.appendChild(playerIdentity(name,Number(names.includes(name))));
   });
 }
+function formatPlayerWinRate(row) {
+  return row.games ? (row.wins / row.games * 100).toLocaleString('it-IT', {maximumFractionDigits:1}) + '%' : '—';
+}
 function createWinRate(row) {
   const rate = row.games ? row.wins / row.games * 100 : null;
   const section = textElement('div','','win-rate');
@@ -2153,6 +2155,7 @@ function renderProfileIdentity(name, napoleon) {
 let avatarEditorName = null, avatarEditorData = null, avatarBusy = false, avatarFileRequest = 0;
 async function openAvatarEditor(name) {
   if (!canEditPlayerAvatar(name) || avatarBusy) return;
+  resetAvatarCrop();
   avatarEditorName = name;avatarEditorData = null;const request = ++avatarFileRequest;
   document.getElementById('avatarMessage').textContent = '';
   document.getElementById('avatarFile').value = '';document.getElementById('avatarCameraFile').value = '';
@@ -2163,42 +2166,70 @@ async function openAvatarEditor(name) {
   const data = await loadPlayerAvatar(name);
   if (request === avatarFileRequest && avatarEditorName === name) document.getElementById('avatarRemoveButton').disabled = !data;
 }
-async function compressAvatarFile(file) {
+let avatarCrop = null, avatarCropPointer = null;
+function resetAvatarCrop() {
+  avatarCrop = null; avatarCropPointer = null;
+  document.getElementById('avatarCropControls').hidden = true;
+}
+async function decodeAvatarFile(file) {
   if (!file || !/^image\/(jpeg|png|webp|gif|avif|heic|heif)$/i.test(file.type)) throw new Error('Scegli una foto supportata dal browser, per esempio JPG o PNG.');
   if (file.size > 20 * 1024 * 1024) throw new Error('Scegli una foto inferiore a 20 MB.');
   const url = URL.createObjectURL(file), image = new Image();
   try {
-    image.src = url;await image.decode();
-    const side = Math.min(image.naturalWidth,image.naturalHeight);
-    if (!side) throw new Error('Immagine non valida.');
-    const canvas = document.createElement('canvas');canvas.width = canvas.height = Math.min(256,side);
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('Modifica immagini non supportata dal browser.');
-    context.fillStyle = '#171917';context.fillRect(0,0,canvas.width,canvas.height);
-    context.drawImage(image,(image.naturalWidth-side)/2,(image.naturalHeight-side)/2,side,side,0,0,canvas.width,canvas.height);
-    for (const quality of [.84,.72,.6,.48,.36,.24]) {
-      let data = canvas.toDataURL('image/webp',quality);
-      if (!data.startsWith('data:image/webp;')) data = canvas.toDataURL('image/jpeg',quality);
-      if (validAvatarData(data)) return data;
-    }
-    throw new Error('La foto resta troppo grande. Scegli un’altra immagine.');
-  } catch (error) {
-    throw new Error(error.name === 'EncodingError' ? 'Formato non supportato. Prova una foto JPG o PNG.' : error.message);
-  } finally { URL.revokeObjectURL(url); }
+    image.src = url; await image.decode();
+    if (!image.naturalWidth || !image.naturalHeight) throw new Error('Immagine non valida.');
+    return image;
+  } catch { throw new Error('Impossibile aprire la foto. Prova una foto JPG o PNG.'); }
+  finally { URL.revokeObjectURL(url); }
+}
+function encodeAvatarCanvas(canvas) {
+  for (const quality of [.84,.72,.6,.48,.36,.24]) {
+    let data = canvas.toDataURL('image/webp',quality);
+    if (!data.startsWith('data:image/webp;')) data = canvas.toDataURL('image/jpeg',quality);
+    if (validAvatarData(data)) return data;
+  }
+  throw new Error('La foto resta troppo grande. Scegli un’altra immagine.');
+}
+function drawAvatarCrop(canvas, crop) {
+  canvas.width = canvas.height = 256;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Modifica immagini non supportata dal browser.');
+  const {image,zoom} = crop, side = Math.min(image.naturalWidth,image.naturalHeight) / zoom;
+  crop.x = Math.max(side/2,Math.min(image.naturalWidth-side/2,crop.x));
+  crop.y = Math.max(side/2,Math.min(image.naturalHeight-side/2,crop.y));
+  context.fillStyle = '#171917'; context.fillRect(0,0,256,256);
+  context.drawImage(image,crop.x-side/2,crop.y-side/2,side,side,0,0,256,256);
+  return canvas;
+}
+async function compressAvatarFile(file) {
+  const image = await decodeAvatarFile(file);
+  return encodeAvatarCanvas(drawAvatarCrop(document.createElement('canvas'),{image,zoom:1,x:image.naturalWidth/2,y:image.naturalHeight/2}));
+}
+function renderAvatarCrop(finalize = true) {
+  if (!avatarCrop || avatarBusy) return;
+  const canvas = drawAvatarCrop(document.getElementById('avatarCropCanvas'),avatarCrop);
+  document.getElementById('avatarZoom').value = avatarCrop.zoom;
+  if (finalize) {
+    try {
+      avatarEditorData = encodeAvatarCanvas(canvas);
+      const preview = createAvatar(avatarEditorName,'large',false,false); paintAvatar(preview,avatarEditorData);
+      document.getElementById('avatarPreview').replaceChildren(preview);
+      document.getElementById('avatarSaveButton').disabled = false;
+    } catch (error) { avatarEditorData = null; document.getElementById('avatarSaveButton').disabled = true; document.getElementById('avatarMessage').textContent = error.message; }
+  }
 }
 async function previewAvatarFile(file) {
+  if (avatarBusy || !file) return;
   const request = ++avatarFileRequest;
-  avatarEditorData = null;document.getElementById('avatarSaveButton').disabled = true;
-  if (!file) return;
+  resetAvatarCrop(); avatarEditorData = null; document.getElementById('avatarSaveButton').disabled = true;
   document.getElementById('avatarMessage').textContent = 'Preparazione della foto…';
   try {
-    const data = await compressAvatarFile(file);
-    if (request !== avatarFileRequest || !canEditPlayerAvatar(avatarEditorName)) return;
-    avatarEditorData = data;
-    const preview = createAvatar(avatarEditorName,'large',false,false);paintAvatar(preview,data);
-    document.getElementById('avatarPreview').replaceChildren(preview);
-    document.getElementById('avatarMessage').textContent = 'Anteprima pronta. Conferma per salvare.';
-    document.getElementById('avatarSaveButton').disabled = false;
+    const image = await decodeAvatarFile(file);
+    if (request !== avatarFileRequest || !canEditPlayerAvatar(avatarEditorName) || !document.getElementById('avatarDialog').open) return;
+    avatarCrop = {image,zoom:1,x:image.naturalWidth/2,y:image.naturalHeight/2};
+    document.getElementById('avatarCropControls').hidden = false;
+    renderAvatarCrop();
+    document.getElementById('avatarMessage').textContent = 'Trascina la foto e regola lo zoom. L’anteprima mostra il ritaglio finale.';
   } catch (error) { if (request === avatarFileRequest) document.getElementById('avatarMessage').textContent = error.message; }
 }
 async function savePlayerAvatar(name, data) {
@@ -2227,6 +2258,7 @@ async function commitAvatar(remove = false) {
   const dialog = document.getElementById('avatarDialog');
   dialog.querySelectorAll('button,input').forEach(item => item.disabled = true);
   try {
+    if (!remove && avatarCrop) avatarEditorData = encodeAvatarCanvas(drawAvatarCrop(document.getElementById('avatarCropCanvas'),avatarCrop));
     await savePlayerAvatar(avatarEditorName,remove ? '' : avatarEditorData);
     avatarFileRequest++;dialog.close();
   } catch (error) {
@@ -2650,3 +2682,31 @@ document.querySelectorAll('.brand-bar').forEach(header => {
 document.getElementById('backFromAdminButton').addEventListener('click', () => {
   if (getCurrentPlayerName()) navigateTo('home'); else showScreen(playerScreen);
 });
+
+const cropCanvas = document.getElementById('avatarCropCanvas');
+cropCanvas.addEventListener('pointerdown',event => {
+  if (!avatarCrop || avatarBusy || avatarCropPointer || (event.pointerType === 'mouse' && event.button !== 0)) return;
+  avatarCropPointer = {id:event.pointerId,x:event.clientX,y:event.clientY}; cropCanvas.setPointerCapture(event.pointerId); event.preventDefault();
+});
+cropCanvas.addEventListener('pointermove',event => {
+  if (!avatarCrop || avatarBusy || avatarCropPointer?.id !== event.pointerId) return;
+  const side = Math.min(avatarCrop.image.naturalWidth,avatarCrop.image.naturalHeight)/avatarCrop.zoom;
+  const ratio = side/cropCanvas.getBoundingClientRect().width;
+  avatarCrop.x -= (event.clientX-avatarCropPointer.x)*ratio;
+  avatarCrop.y -= (event.clientY-avatarCropPointer.y)*ratio;
+  avatarCropPointer.x = event.clientX; avatarCropPointer.y = event.clientY;
+  renderAvatarCrop(false);
+});
+for (const eventName of ['pointerup','pointercancel','lostpointercapture']) cropCanvas.addEventListener(eventName,event => {
+  if (avatarCropPointer?.id !== event.pointerId) return;
+  avatarCropPointer = null; renderAvatarCrop();
+});
+cropCanvas.addEventListener('keydown',event => {
+  if (!avatarCrop || avatarBusy || !['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) return;
+  event.preventDefault(); const step = Math.min(avatarCrop.image.naturalWidth,avatarCrop.image.naturalHeight)/avatarCrop.zoom*.05;
+  avatarCrop.x += event.key === 'ArrowLeft' ? step : event.key === 'ArrowRight' ? -step : 0;
+  avatarCrop.y += event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0; renderAvatarCrop();
+});
+document.getElementById('avatarZoom').addEventListener('input',event => {if (avatarCrop && !avatarBusy) {avatarCrop.zoom=Number(event.target.value);renderAvatarCrop();}});
+document.getElementById('avatarCenterButton').addEventListener('click',() => {if (avatarCrop && !avatarBusy) {avatarCrop.x=avatarCrop.image.naturalWidth/2;avatarCrop.y=avatarCrop.image.naturalHeight/2;avatarCrop.zoom=1;renderAvatarCrop();}});
+document.getElementById('avatarDialog').addEventListener('close',() => {avatarFileRequest++;resetAvatarCrop();avatarEditorData=null;});

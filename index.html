@@ -51,17 +51,12 @@
 <section id="homeScreen" class="screen">
   <div class="brand-bar" aria-label="Ranking Scopa"><span>Ranking Scopa</span><span class="brand-mark" aria-hidden="true">RS</span></div>
 
-  <div class="home-header">
-    <div>
-      <p class="small-label">IL TUO TAVOLO</p>
-      <h2 id="welcomePlayerName">GIOCATORE</h2>
-    </div>
-
+  <div class="home-header member-pass">
+    <div class="pass-heading"><span>RANKING SCOPA</span><span>MEMBER PASS</span></div>
     <div id="homeAvatar"></div>
+    <div class="pass-player"><p class="small-label">IL TUO TAVOLO</p><h2 id="welcomePlayerName">GIOCATORE</h2></div>
     <p id="homePlayerSummary" class="home-player-summary"></p>
-    <div id="homeSeason" class="season-badge">
-      SETTEMBRE 2026
-    </div>
+    <div class="pass-footer"><span>MEMBER / PLAYER</span><div id="homeSeason" class="season-badge"></div></div>
   </div>
 
 
@@ -374,14 +369,13 @@
   </dialog>
   <dialog id="avatarDialog" class="roster-dialog" aria-labelledby="avatarTitle">
     <p class="small-label">IL TUO PROFILO</p><h3 id="avatarTitle">Cambia foto profilo</h3>
-    <div id="avatarPreview"></div>
+    <div id="avatarCropControls" hidden><canvas id="avatarCropCanvas" width="256" height="256" tabindex="0" aria-label="Ritaglio foto: trascina oppure usa i tasti freccia"></canvas><label for="avatarZoom">ZOOM</label><input id="avatarZoom" type="range" min="1" max="4" step="0.01" value="1"><button id="avatarCenterButton" class="text-button" type="button">RICENTRA FOTO</button></div><div id="avatarPreview" aria-label="Anteprima avatar finale"></div>
     <div class="avatar-sources"><button id="avatarGalleryButton" class="secondary-button" type="button">SCEGLI FOTO</button><button id="avatarCameraButton" class="secondary-button" type="button">SCATTA FOTO</button></div>
     <input id="avatarFile" type="file" accept="image/*" hidden>
     <input id="avatarCameraFile" type="file" accept="image/*" capture="user" hidden>
     <p id="avatarMessage" class="match-message" role="status" aria-live="polite"></p>
-    <button id="avatarSaveButton" class="primary-button match-action" type="button" disabled>CONFERMA FOTO</button>
     <button id="avatarRemoveButton" class="secondary-button danger-button" type="button">RIMUOVI FOTO</button>
-    <button id="avatarCancelButton" class="secondary-button" type="button">ANNULLA</button>
+    <div class="avatar-editor-actions"><button id="avatarCancelButton" class="secondary-button" type="button">ANNULLA</button><button id="avatarSaveButton" class="primary-button" type="button" disabled>SALVA FOTO</button></div>
   </dialog>
   <dialog id="addPlayerDialog" class="roster-dialog" aria-labelledby="addPlayerTitle">
     <h3 id="addPlayerTitle">AGGIUNGI GIOCATORE</h3>

@@ -2791,3 +2791,27 @@ function createPointMatchCard(match,referencePlayer,points,movement) {
   }
   const button=textElement('button','APRI PARTITA','text-button');button.type='button';button.addEventListener('click',()=>openMatch(match));card.appendChild(button);return card;
 }
+
+// The personal pass reuses the ranking profile flow and bound member identity.
+const homeMemberPass = document.getElementById('homeMemberPass');
+let homePassOpening = false;
+async function openHomeMemberPass() {
+  if (homePassOpening || !canUseAppClient()) return;
+  const name = getCurrentPlayerName();
+  if (!name) return;
+  homePassOpening = true;
+  homeMemberPass.setAttribute('aria-busy','true');
+  try { await openHomePlayerProfile(name,homeMemberPass); }
+  finally { homePassOpening = false; homeMemberPass.removeAttribute('aria-busy'); }
+}
+homeMemberPass.addEventListener('click',event => {
+  // Leave independent controls inside the card to their own handlers.
+  if (event.target.closest('button,a,input,select,textarea,[role="button"],[contenteditable="true"]') !== homeMemberPass &&
+      event.target.closest('button,a,input,select,textarea,[role="button"],[contenteditable="true"]')) return;
+  openHomeMemberPass();
+});
+homeMemberPass.addEventListener('keydown',event => {
+  if (event.target !== homeMemberPass || !['Enter',' '].includes(event.key)) return;
+  event.preventDefault();
+  if (!event.repeat) openHomeMemberPass();
+});

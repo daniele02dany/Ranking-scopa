@@ -853,12 +853,14 @@ const profileMonth = document.getElementById('profileMonth');
 let playersRequest = 0;
 let playersSeasonData = null;
 let profilePlayerName = null;
+let profileOpenRequest = 0;
 let profileReturnTo = 'home';
 
 async function refreshPlayers() {
   if (!canUseAppClient()) return;
-  await ensurePreviousSeasonsClosed();
   const request = ++playersRequest;
+  await ensurePreviousSeasonsClosed();
+  if (request !== playersRequest) return;
   const seasonId = playersMonth.value;
   profileMonth.value = seasonId;
   const messages = [document.getElementById('playersMessage'), document.getElementById('profileMessage')];
@@ -900,11 +902,12 @@ async function refreshPlayers() {
 async function openHomePlayerProfile(name, button) {
   if (!canUseAppClient() || !homeScreen.classList.contains('active')) return;
   const uid = auth.currentUser?.uid;
+  const opening = ++profileOpenRequest;
   button.disabled = true;
   playersMonth.value = getSeasonId();
   try {
     await refreshPlayers();
-    if (!canUseAppClient() || auth.currentUser?.uid !== uid || !homeScreen.classList.contains('active')) return;
+    if (opening !== profileOpenRequest || !canUseAppClient() || auth.currentUser?.uid !== uid || !homeScreen.classList.contains('active')) return;
     if (!playersSeasonData || playersSeasonData.seasonId !== getSeasonId() || document.getElementById('playersMessage').textContent) {
       document.getElementById('homeDataMessage').textContent = 'Impossibile caricare le statistiche. Riprova.';
       return;
@@ -1593,7 +1596,11 @@ function renderHistory() {
     button.addEventListener('click',() => { historyFilter = filter; renderHistory(); });
     filters.appendChild(button);
   }
-  renderMatches(document.getElementById('historyList'), filterHistoryMatches(historyMatches,historyFilter,player), 'Nessuna partita per questo filtro.');
+  const list = document.getElementById('historyList');list.replaceChildren();
+  const filtered = filterHistoryMatches(historyMatches,historyFilter,player);
+  if (!filtered.length) list.appendChild(textElement('p','Nessuna partita per questo filtro.','empty-state'));
+  const state = calculateSeasonState(historyMatches,availablePlayers,historyMonth.value);
+  filtered.forEach(match=>list.appendChild(createPointMatchCard(match,player,state.matchDeltas.get(match.id))));
 }
 function matchDate(match) {
   return match.createdAt?.toDate?.().toLocaleString('it-IT', {timeZone:'Europe/Rome',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) || match.seasonId;
@@ -2741,24 +2748,46 @@ function renderPlayerMovements(container, matches, name, seasonId, state) {
   for (const match of played) {
     if (seen.has(match.id)) continue; seen.add(match.id);
     const move = byId.get(match.id);
-    const card = textElement('details','','sp-match '+(move ? move.won ? 'is-win' : 'is-loss' : 'is-pending'));
-    const summary = textElement('summary','');
-    summary.appendChild(textElement('small',matchDate(match),'sp-date'));
-    const versus = textElement('div','','match-versus');
-    const a=textElement('span','','match-team'),b=textElement('span','','match-team');
-    renderTeam(a,match,match.teamA);renderTeam(b,match,match.teamB);
-    versus.append(a,textElement('strong',move ? match.scoreA+'–'+match.scoreB : 'VS','match-score'),b);summary.appendChild(versus);
-    summary.appendChild(textElement('span',move ? (move.won ? 'VINTA' : 'PERSA')+' · '+signedSP(move.delta)+' · Dettaglio SP' : 'IN CORSO · Nessun movimento SP',move ? move.won ? 'sp-positive' : 'sp-negative' : 'sp-date'));
-    card.appendChild(summary);
-    if (move) {
-      const detail=textElement('dl','','sp-breakdown');
-      appendProfileStat(detail,'Punti risultato',signedSP(move.resultDelta));detail.lastElementChild.classList.add(move.resultDelta>0?'sp-positive':'sp-negative');
-      appendProfileStat(detail,'Bonus partita',signedSP(move.bonus));detail.lastElementChild.classList.add('sp-gold');
-      appendProfileStat(detail,'Variazione netta',signedSP(move.delta));
-      card.appendChild(detail);card.appendChild(textElement('p',formatSP(move.previousSP)+' → '+formatSP(move.newSP)+' SP','sp-balance'));
-    }
-    const button=textElement('button','APRI PARTITA','text-button');button.type='button';button.addEventListener('click',()=>openMatch(match));card.appendChild(button);container.appendChild(card);
+    container.appendChild(createPointMatchCard(match,name,state.matchDeltas.get(match.id),move));
   }
 }
 
-
+// Shared rendering; the caller explicitly chooses the reference player.
+function createPointBreakdown(resultDelta,bonus,net) {
+  const detail=textElement('dl','','sp-breakdown');
+  for (const [label,value,style] of [['RISULTATO',resultDelta,resultDelta>0?'sp-positive':'sp-negative'],['BONUS',bonus,'sp-gold'],['NETTO',net,net>0?'sp-positive':'sp-negative']]) {
+    appendProfileStat(detail,label,signedSP(value));detail.lastElementChild.classList.add(style);
+  }
+  return detail;
+}
+function createPointMatchCard(match,referencePlayer,points,movement) {
+  const completed=match.status==='completed';
+  const inA=match.teamA.includes(referencePlayer), inB=match.teamB.includes(referencePlayer);
+  const personal=completed && points && (inA||inB);
+  const won=personal && (inA ? match.scoreA>match.scoreB : match.scoreB>match.scoreA);
+  const result=personal ? (inA?points.deltaA:points.deltaB) : null;
+  const net=personal ? (inA?points.totalDeltaA:points.totalDeltaB) : null;
+  const card=textElement('details','','sp-match '+(personal ? won?'is-win':'is-loss':'is-pending'));
+  const summary=textElement('summary','');
+  const top=textElement('div','','sp-card-top');top.appendChild(textElement('small',matchDate(match),'sp-date'));
+  if(personal) top.appendChild(textElement('strong',signedSP(net),'sp-net '+(net>0?'sp-positive':'sp-negative')));
+  summary.appendChild(top);
+  const versus=textElement('div','','match-versus');
+  const a=textElement('span','','match-team'),b=textElement('span','','match-team');renderTeam(a,match,match.teamA);renderTeam(b,match,match.teamB);
+  if(completed){(match.scoreA>match.scoreB?a:b).classList.add('team-winner');(match.scoreA>match.scoreB?b:a).classList.add('team-loser');}
+  versus.append(a,textElement('strong',completed?match.scoreA+'–'+match.scoreB:'VS','match-score'),b);summary.appendChild(versus);
+  const footer=textElement('div','','sp-card-footer');
+  footer.appendChild(textElement('span',personal?(won?'VINTA':'PERSA'):completed?'CONCLUSA':'IN CORSO','outcome-pill '+(personal?won?'outcome-win':'outcome-loss':'')));
+  footer.appendChild(textElement('span',completed?'SP':'Nessun movimento SP','sp-toggle'));summary.appendChild(footer);
+  if((match.correctionCount||0)>0)summary.appendChild(textElement('small','CORRETTO','correction-badge'));
+  card.appendChild(summary);
+  if(personal) {
+    card.appendChild(createPointBreakdown(result,points.participationBonus,net));
+    if(movement)card.appendChild(textElement('p',formatSP(movement.previousSP)+' → '+formatSP(movement.newSP)+' SP','sp-balance'));
+  } else if(completed && points) {
+    for(const [team,delta,total] of [[match.teamA,points.deltaA,points.totalDeltaA],[match.teamB,points.deltaB,points.totalDeltaB]]) {
+      card.appendChild(textElement('p',team.join(' - ')+' · per giocatore','sp-team-label'));card.appendChild(createPointBreakdown(delta,points.participationBonus,total));
+    }
+  }
+  const button=textElement('button','APRI PARTITA','text-button');button.type='button';button.addEventListener('click',()=>openMatch(match));card.appendChild(button);return card;
+}

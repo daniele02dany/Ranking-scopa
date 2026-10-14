@@ -790,7 +790,8 @@ async function refreshHome() {
   const selectedName = getCurrentPlayerName();
   document.getElementById('homeAvatar').replaceChildren(...(selectedName ? [createAvatar(selectedName,'medium')] : []));
   document.getElementById('homeSeason').textContent = new Date().toLocaleDateString('it-IT', {month:'long',year:'numeric',timeZone:'Europe/Rome'}).toUpperCase();
-  document.getElementById('homePlayerSummary').textContent = '';
+  document.getElementById('homePlayerSummary').replaceChildren();
+  document.getElementById('homeRankSeal').replaceChildren();
   message.textContent = 'Aggiornamento partite e classifica…';
   try {
     const matches = await loadSeasonMatches(month);
@@ -801,9 +802,10 @@ async function refreshHome() {
     podium.replaceChildren();
     const ranked = calculateRanking(matches);
     const own = ranked.find(row => row.name === selectedName);
-    document.getElementById('homePlayerSummary').textContent = own
-      ? (ranked.findIndex(row => row.rating === own.rating) + 1) + '° nel mese · ' + own.rating + ' SP · ' + own.wins + 'W - ' + own.losses + 'L'
-      : 'Il tuo mese deve ancora iniziare';
+    const summary=document.getElementById('homePlayerSummary');summary.replaceChildren();
+    renderRankSeal(document.getElementById('homeRankSeal'),ranked,selectedName);
+    if(own){summary.appendChild(textElement('strong',formatSP(own.rating)+' SP','pass-total'));summary.appendChild(createPassRecord(own));}
+    else summary.textContent='Il tuo mese deve ancora iniziare';
     renderRanking(podium, ranked, matches, true);
     document.getElementById('homeRankingMonth').textContent = new Date(month + '-01T12:00:00Z').toLocaleDateString('it-IT',{month:'long',year:'numeric',timeZone:'Europe/Rome'});
     message.textContent = '';
@@ -934,12 +936,12 @@ function renderPlayerProfile() {
   document.getElementById('profileInactiveBadge').hidden = !allPlayers.some(player => player.name === row.name && !player.active);
   document.getElementById('profileRating').textContent = formatSP(row.rating) + ' SP';
   document.getElementById('profilePassSeason').textContent = playersSeasonData.seasonId;
-  document.getElementById('profilePassRecord').textContent = row.wins + 'V · ' + row.losses + 'P · ' + formatPlayerWinRate(row) + ' win rate';
+  document.getElementById('profilePassRecord').replaceChildren(createPassRecord(row));
+  document.getElementById('profileMatchesTitle').textContent = row.name === getCurrentPlayerName() ? 'LE TUE PARTITE' : 'LE PARTITE DI '+row.name.toLocaleUpperCase('it-IT');
   document.getElementById('profileResultPoints').textContent = signedSP((row.competitivePoints ?? 1000) - 1000);
   document.getElementById('profileResultPoints').className = (row.competitivePoints ?? 1000) < 1000 ? 'sp-negative' : 'sp-positive';
   document.getElementById('profileTotalPoints').textContent = formatSP(row.rating) + ' SP';
-  document.getElementById('profilePosition').textContent = rows.some(player => player.name === row.name)
-    ? (rows.findIndex(player => player.rating === row.rating) + 1) + '° posto' : '—';
+  renderRankSeal(document.getElementById('profilePosition'),rows,row.name);
   const napoleonCount = countMatchNapoleons(matches).get(row.name) || 0;
   document.getElementById('profileNapoleons').textContent = napoleonCount;
   renderProfileIdentity(row.name,napoleonCount);
@@ -1017,11 +1019,13 @@ function renderHallOfFame(seasons, matches = []) {
   list.replaceChildren();
   document.getElementById('hallOfFameContent').hidden = !archived.length;
   document.getElementById('hallOfFameMessage').textContent = archived.length ? '' : 'Nessuna stagione archiviata.';
-  calculateSeasonPalmares(archived).forEach(row => {
-    const item = textElement('li', '', 'palmares-row');
-    item.appendChild(textElement('strong', row.player));
-    item.appendChild(textElement('span', `${row.wins} ${row.wins === 1 ? 'TITOLO' : 'TITOLI'}`,'titles-plate'));
-    palmares.appendChild(item);
+  const titleRows=calculateSeasonPalmares(archived);
+  titleRows.forEach(row => {
+    const months=getWonSeasonIds(archived,row.player);
+    const item=textElement('li','','palmares-row'+(row.wins===titleRows[0].wins?' palmares-leader':''));
+    const accordion=textElement('details','','titles-accordion');
+    const heading=textElement('summary','');heading.appendChild(textElement('strong',row.player));heading.appendChild(textElement('span',months.length+' '+(months.length===1?'TITOLO':'TITOLI'),'titles-plate'));
+    accordion.appendChild(heading);const list=textElement('ul','','won-months');months.forEach(id=>list.appendChild(textElement('li',formatWonMonth(id))));accordion.appendChild(list);item.appendChild(accordion);palmares.appendChild(item);
   });
   archived.forEach(season => {
     const napoleonCounts = getSeasonNapoleonCounts(season,matches);
@@ -2778,7 +2782,7 @@ function createPointMatchCard(match,referencePlayer,points,movement) {
   versus.append(a,textElement('strong',completed?match.scoreA+'–'+match.scoreB:'VS','match-score'),b);summary.appendChild(versus);
   const footer=textElement('div','','sp-card-footer');
   footer.appendChild(textElement('span',personal?(won?'VINTA':'PERSA'):completed?'CONCLUSA':'IN CORSO','outcome-pill '+(personal?won?'outcome-win':'outcome-loss':'')));
-  footer.appendChild(textElement('span',completed?'SP':'Nessun movimento SP','sp-toggle'));summary.appendChild(footer);
+  if(!completed) footer.appendChild(textElement('span','Nessun movimento SP','sp-toggle'));summary.appendChild(footer);
   if((match.correctionCount||0)>0)summary.appendChild(textElement('small','CORRETTO','correction-badge'));
   card.appendChild(summary);
   if(personal) {
@@ -2815,3 +2819,16 @@ homeMemberPass.addEventListener('keydown',event => {
   event.preventDefault();
   if (!event.repeat) openHomeMemberPass();
 });
+
+function createPassRecord(row){
+  const record=textElement('span','','pass-record');record.append(textElement('span',row.wins+' V','sp-positive'),textElement('span',row.losses+' P','sp-negative'),textElement('span',formatPlayerWinRate(row),'sp-gold'));return record;
+}
+function renderRankSeal(container,rows,name){
+  container.replaceChildren();const row=rows.find(item=>item.name===name);
+  if(!row){container.className='rank-seal rank-unranked';container.textContent='—';container.setAttribute('aria-label','Posizione non disponibile');return;}
+  const position=rows.findIndex(item=>item.rating===row.rating)+1;
+  container.className='rank-seal rank-tier-'+(position<=3?position:'neutral');container.setAttribute('aria-label',position+'° posto nella classifica mensile');
+  container.append(textElement('strong',position+'°'),textElement('span','POSTO'));
+}
+function getWonSeasonIds(seasons,player){return [...new Set(seasons.filter(season=>season.closed===true && season.podium.some(entry=>entry.player===player && entry.position===1)).map(season=>season.seasonId))].sort((a,b)=>b.localeCompare(a));}
+function formatWonMonth(id){return new Date(id+'-01T12:00:00Z').toLocaleDateString('it-IT',{month:'long',year:'numeric',timeZone:'Europe/Rome'}).toLocaleUpperCase('it-IT');}

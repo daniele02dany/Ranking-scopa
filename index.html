@@ -53,7 +53,7 @@
 
   <div id="homeMemberPass" class="home-header member-pass" role="button" tabindex="0" aria-label="Apri il tuo profilo e le tue statistiche">
     <div class="pass-heading"><span>RANKING SCOPA</span><span>MEMBER PASS</span></div>
-    <div id="homeAvatar"></div>
+    <div id="homeAvatar"></div><div id="homeRankSeal" class="rank-seal" aria-label="Posizione mensile"></div>
     <div class="pass-player"><p class="small-label">IL TUO PASS</p><h2 id="welcomePlayerName">GIOCATORE</h2></div>
     <p id="homePlayerSummary" class="home-player-summary"></p>
     <div class="pass-footer"><span>MEMBER / PLAYER</span><div id="homeSeason" class="season-badge"></div></div>
@@ -242,7 +242,7 @@
   <div class="brand-bar" aria-label="Ranking Scopa"><span>Ranking Scopa</span><span class="brand-mark" aria-hidden="true">RS</span></div>
   <p class="small-label">IL REGISTRO DEL TAVOLO</p>
   <h2>Le partite.</h2>
-  <button id="hallOfFameButton" class="primary-button hall-of-fame-entry" type="button">Hall of Fame</button>
+  <button id="hallOfFameButton" class="primary-button hall-of-fame-entry" type="button"><svg class="champion-icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 15h16v11c0 12-16 12-16 0V15Zm0 4h-6c0 8 3 11 8 11m14-11h6c0 8-3 11-8 11M32 35v10m-8 4h16m-12-4h8M19 48C7 39 7 22 17 12m28 36c12-9 12-26 2-36M14 38l-7-3m7-6-7-4m9-5-6-5m40 23 7-3m-7-6 7-4m-9-5 6-5M21 53l11 4 11-4"/></svg><span>Hall of Fame</span></button>
   <label class="month-label" for="historyMonth">Mese della partita</label>
   <input id="historyMonth" class="month-input" type="month">
   <button id="refreshHistoryButton" class="secondary-button">AGGIORNA</button>
@@ -254,8 +254,7 @@
 
 <section id="hallOfFameScreen" class="screen">
   <div class="brand-bar" aria-label="Ranking Scopa"><span>Ranking Scopa</span><span class="brand-mark" aria-hidden="true">RS</span></div>
-  <p class="small-label">LE STAGIONI CONCLUSE</p>
-  <h2>Hall of Fame</h2>
+  <header class="champions-header"><svg class="champion-icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 15h16v11c0 12-16 12-16 0V15Zm0 4h-6c0 8 3 11 8 11m14-11h6c0 8-3 11-8 11M32 35v10m-8 4h16m-12-4h8M19 48C7 39 7 22 17 12m28 36c12-9 12-26 2-36M14 38l-7-3m7-6-7-4m9-5-6-5m40 23 7-3m-7-6 7-4m-9-5 6-5M21 53l11 4 11-4"/></svg><h2>Hall of Fame</h2><p class="small-label">I CAMPIONI DEL CIRCOLO</p></header>
   <button id="backToHistoryButton" class="secondary-button" type="button">← TORNA ALLO STORICO</button>
   <button id="refreshHallOfFameButton" class="secondary-button" type="button">AGGIORNA</button>
   <p id="hallOfFameMessage" class="match-message" role="status" aria-live="polite"></p>
@@ -305,7 +304,7 @@
 
       <p id="profilePassSeason" class="small-label"></p>
       <div class="pass-points"><span>Scopa Points</span><strong id="profileRating"></strong></div>
-      <p id="profilePassRecord"></p><p id="profilePosition"></p><p id="profileChange" hidden></p>
+      <p id="profilePassRecord"></p><div id="profilePosition" class="rank-seal"></div><p id="profileChange" hidden></p>
       <span class="pass-monogram" aria-hidden="true">RS</span>
     </section>
     <details class="sp-summary"><summary>SP · Riepilogo mensile</summary>
@@ -328,7 +327,7 @@
 
     <details class="profile-details" open><summary>RECORD</summary><dl id="profileRecords" class="profile-detail-list"></dl></details>
     <details class="profile-details" open><summary>COMPAGNI &amp; RIVALI</summary><dl id="profileCompanions" class="profile-detail-list"></dl></details>
-    <section class="player-movements"><h3>LE SUE PARTITE</h3><p class="muted">Movimenti SP · Apri una partita per separare risultato e bonus.</p><div id="profileMatches"></div></section>
+    <section class="player-movements"><h3 id="profileMatchesTitle">LE TUE PARTITE</h3><div id="profileMatches"></div></section>
   </div>
   <section class="profile-career-card" aria-labelledby="profileCareerTitle">
     <h3 id="profileCareerTitle">PALMARÈS</h3>

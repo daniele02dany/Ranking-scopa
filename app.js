@@ -765,7 +765,8 @@ function renderRanking(container, rows, matches = [], compact = false) {
     person.setAttribute('aria-label', 'Statistiche di ' + row.name);
     person.addEventListener('click', () => openHomePlayerProfile(row.name, person));
     person.appendChild(createAvatar(row.name));
-    const identity = textElement('div','');identity.appendChild(playerIdentity(row.name,napoleon.get(row.name)));
+    const identity = textElement('div','','ranking-identity');
+    const nameLine = textElement('div','','ranking-name-line');nameLine.appendChild(playerIdentity(row.name,napoleon.get(row.name)));identity.appendChild(nameLine);
     const record = textElement('small','','ranking-record');
     record.append(textElement('span',row.wins+'V','sp-positive'),textElement('span',' · '),textElement('span',row.losses+'P','sp-negative'),textElement('span',' · '+formatPlayerWinRate(row),'sp-gold'));identity.appendChild(record);person.appendChild(identity);entry.appendChild(person);
     entry.addEventListener('click',event => {if (!event.target.closest('button')) person.click();});
@@ -774,7 +775,7 @@ function renderRanking(container, rows, matches = [], compact = false) {
     if (!compact) entry.appendChild(createWinRate(row));
     if (!compact && row.games) entry.appendChild(textElement('small','Bonus +' + row.participationBonus + ' SP','participation-bonus'));
     const streakBadge = createWinStreakBadge(calculatePlayerAdvancedStats(matches,row.name,matches[0]?.seasonId).streak);
-    if (streakBadge) identity.appendChild(streakBadge);
+    if (streakBadge) nameLine.appendChild(streakBadge);
     if (!compact && row.games) { const form = textElement('span','','recent-form');renderRecentForm(form,getRecentForm(matches,row.name));entry.appendChild(form); }
     container.appendChild(entry);
   });
@@ -1404,7 +1405,7 @@ function renderPlayerAdvancedStats(stats) {
   const {best, mostFrequent} = stats.partnerships;
   const {nemesis, favoriteVictim} = stats.opponents;
   appendProfileStat(companions, 'Miglior compagno', best?.name || 'Dati insufficienti', best
-    ? `${best.games} partite · ${best.wins} vittorie · ${(best.winRate * 100).toLocaleString('it-IT',{maximumFractionDigits:1})}%` : 'Servono almeno 2 partite insieme');
+    ? `${best.games} partite · ${best.wins} vittorie · ${Math.round(best.winRate * 100)}%` : 'Servono almeno 2 partite insieme');
   appendProfileStat(companions, 'Compagno più frequente', mostFrequent?.name || '—', mostFrequent
     ? `${mostFrequent.games} ${mostFrequent.games === 1 ? 'partita insieme' : 'partite insieme'}` : 'Nessuna partita');
   appendProfileStat(companions, 'Nemesi', nemesis?.name || '—', nemesis
@@ -2083,7 +2084,7 @@ function renderTeam(container, match, team) {
   });
 }
 function formatPlayerWinRate(row) {
-  return row.games ? (row.wins / row.games * 100).toLocaleString('it-IT', {maximumFractionDigits:1}) + '%' : '—';
+  return row.games ? Math.round(row.wins / row.games * 100) + '%' : '—';
 }
 function createWinRate(row) {
   const rate = row.games ? row.wins / row.games * 100 : null;

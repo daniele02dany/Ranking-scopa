@@ -258,3 +258,39 @@ dialog{max-height:calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-ins
 .theme-halloween #homeMemberPass{animation:halloween-pass-reveal 3s ease-out 1}
 @media(prefers-reduced-motion:reduce){.theme-halloween #homeMemberPass{animation:none}.theme-halloween .halloween-decoration{animation:none;transition:none}}
 @media(max-width:360px){.theme-halloween .halloween-bats{width:64px;left:43%;top:-12px}.theme-halloween .halloween-web{width:56px;height:56px}.theme-halloween .champions-header .halloween-web{width:72px;height:72px}}
+
+/* Halloween spectacle: dedicated decorative bands keep all data unobscured. */
+.theme-halloween body{background:radial-gradient(ellipse at 0 0,#a44b2244,transparent 40%),radial-gradient(ellipse at 100% 35%,#632f7840,transparent 50%),linear-gradient(#100d16,#08090c);background-attachment:fixed}
+.theme-halloween .home-header.member-pass,.theme-halloween .player-member-pass{border-color:#dc965e;box-shadow:0 0 0 3px #bd71391a,0 0 45px #a1482833,12px 15px 45px #632c7626;background:radial-gradient(ellipse at top left,#a9512940,transparent 65%),linear-gradient(125deg,#17201a,#24162f 70%,#351d16)}
+.theme-halloween .halloween-edition{display:none}
+.theme-halloween .halloween-web{width:88px;height:88px;opacity:.42}
+.theme-halloween .halloween-bats{color:#dfa66c;opacity:.95;width:88px}
+.theme-halloween .halloween-scene{position:relative;display:block;grid-column:1/-1;isolation:isolate;width:100%;height:96px;margin-top:12px;overflow:hidden;border-top:1px solid #c9936355;background:radial-gradient(ellipse at 20% 90%,#c56b343b,transparent 55%),radial-gradient(ellipse at 85% 50%,#67397555,transparent 65%);pointer-events:none}
+.theme-halloween .halloween-scene:before{content:'';position:absolute;width:42px;height:42px;top:12px;left:calc(50% - 21px);border-radius:50%;background:radial-gradient(circle at 35% 30%,#f4d7a8,#ad956f);box-shadow:0 0 28px #e6c7a43a;opacity:.7;z-index:-1}
+.theme-halloween .halloween-scene:after{content:'';position:absolute;inset:55% -10% -20%;background:radial-gradient(ellipse,#b9b4bd20,transparent 65%),linear-gradient(transparent,#95909912);filter:blur(5px);pointer-events:none}
+.theme-halloween .halloween-scene>span{position:absolute;bottom:8px;left:75px;right:75px;text-align:center;color:#ecc18c;font-size:7px;letter-spacing:1.5px;line-height:1.5;z-index:1}
+.theme-halloween .halloween-scene-pumpkin{width:76px;height:76px;left:0;bottom:0;filter:drop-shadow(0 0 8px #d7762744)}
+.theme-halloween .halloween-scene-skull{width:55px;height:55px;right:6px;bottom:6px;transform:rotate(8deg)}
+.theme-halloween .halloween-scene-bats{width:90px;height:36px;left:calc(50% - 45px);top:9px;color:#17121c}
+.theme-halloween .halloween-section-scene{position:relative;width:100%;margin:0 0 20px}.theme-halloween .halloween-section-scene .halloween-scene{margin:0;border:1px solid #a46d4755;border-radius:14px}
+.theme-halloween .champions-header{border:1px solid #e3ae61;box-shadow:0 0 0 4px #c9985330,0 0 55px #a85c3033,15px 15px 50px #753e7133;background:radial-gradient(ellipse at top,#b2763744,transparent 70%),repeating-linear-gradient(95deg,#ffffff03 0 1px,transparent 1px 5px),linear-gradient(145deg,#17261d,#30192e)}
+.theme-halloween .champions-header .champion-icon{width:76px;height:76px;color:#ffe0a1;filter:drop-shadow(0 0 12px #dc963c88)}
+.theme-halloween .champions-header h2{color:#ffe7b8;text-shadow:0 0 25px #d8944a55}
+.theme-halloween .champions-header .halloween-scene{height:128px;margin-top:18px;border-top-color:#c79b5966}
+.theme-halloween .halloween-scene-tomb{width:80px;height:95px;right:12px;bottom:3px;z-index:-1}
+.theme-halloween .halloween-crypt .halloween-scene-skull{right:29px;bottom:22px;width:35px;height:35px}
+.theme-halloween .halloween-crypt .halloween-scene-pumpkin{width:94px;height:94px}
+.theme-halloween .halloween-crypt>span{bottom:12px;left:95px;right:90px}
+.theme-halloween .halloween-crypt:before{width:50px;height:50px}
+.theme-halloween .ranking-preview{position:relative;padding-top:24px}.theme-halloween .halloween-ranking-pumpkin{width:32px;height:32px;right:0;top:15px}.theme-halloween .ranking-preview>.card-label{padding-right:38px}
+.theme-halloween #homeScreen .ranking-row{border:1px solid #98604455;border-left:2px solid #b57a4b88;background:linear-gradient(110deg,#251a20aa,#1c1724aa);border-radius:12px;padding:12px 8px;margin-bottom:8px;box-shadow:4px 4px 15px #60346913}
+.theme-halloween .sp-match{border-color:#b47b4b66;box-shadow:0 0 18px #7b3d6b20,0 8px 22px #0005}.theme-halloween .sp-match[open]{box-shadow:0 0 24px #bc793b36,0 8px 22px #0005}
+.theme-halloween .palmares-card,.theme-halloween .season-archive-card{border-color:#cf9b5d88;box-shadow:0 0 22px #9d583020,8px 12px 28px #4f2b5628}.theme-halloween .season-archive-card{border-radius:36px 36px 16px 16px;border-top-width:3px;background:linear-gradient(140deg,#28242d,#1b1c1a 65%)}
+.theme-halloween #playerProfileScreen .profile-stat-grid>div{border-color:#ae714e66;background:linear-gradient(145deg,#1b271f,#281b2d)}
+@keyframes halloween-stage-glow{0%{opacity:.65}100%{opacity:1}}
+.theme-halloween .halloween-scene{animation:halloween-stage-glow 2.4s ease-out 1}
+@media(prefers-reduced-motion:reduce){.theme-halloween .halloween-scene{animation:none}}
+@media(max-width:360px){.theme-halloween .halloween-scene{height:86px}.theme-halloween .halloween-scene-pumpkin{width:64px;height:64px}.theme-halloween .halloween-scene-skull{width:45px;height:45px;right:0}.theme-halloween .halloween-scene>span{left:64px;right:52px;font-size:6px;letter-spacing:1px}.theme-halloween .champions-header .halloween-scene{height:112px}.theme-halloween .halloween-crypt .halloween-scene-pumpkin{width:74px;height:74px}.theme-halloween .halloween-crypt .halloween-scene-tomb{width:64px;right:0}.theme-halloween .halloween-crypt .halloween-scene-skull{right:15px;width:30px;height:30px}.theme-halloween .halloween-crypt>span{left:72px;right:65px}.theme-halloween #homeScreen .ranking-row{padding:10px 6px}}
+
+.theme-halloween .member-pass .rank-seal{position:relative;z-index:1}
+

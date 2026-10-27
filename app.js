@@ -752,9 +752,14 @@ function calculateRanking(matches, roster = availablePlayers) {
   return calculateSeasonState(matches, roster).ranking;
 }
 
+function isEligibleForMonthlyRanking(row) { return row.games > 0; }
+function getMonthlyRankingRows(rows) { return rows.filter(isEligibleForMonthlyRanking); }
 function renderRanking(container, rows, matches = [], compact = false) {
+  const idle = rows.filter(row => !isEligibleForMonthlyRanking(row));
+  rows = getMonthlyRankingRows(rows);
   const napoleon = countMatchNapoleons(matches);
   container.replaceChildren();let previousRating,position = 0;
+  if (!rows.length) container.appendChild(textElement('p','La classifica prende forma con la prima partita del mese.','empty-state'));
   rows.forEach((row,index) => {
     if (row.rating !== previousRating) position = index + 1;
     previousRating = row.rating;
@@ -779,6 +784,20 @@ function renderRanking(container, rows, matches = [], compact = false) {
     if (!compact && row.games) { const form = textElement('span','','recent-form');renderRecentForm(form,getRecentForm(matches,row.name));entry.appendChild(form); }
     container.appendChild(entry);
   });
+  if (idle.length) {
+    const group = textElement('details','','unranked-players');
+    group.appendChild(textElement('summary','NON ANCORA IN CLASSIFICA · '+idle.length));
+    const list = textElement('div','','unranked-list');
+    idle.forEach(row=>{
+      const button=textElement('button','','unranked-player');button.type='button';
+      button.setAttribute('aria-label','Statistiche di '+row.name);
+      button.appendChild(createAvatar(row.name));
+      const identity=textElement('span','','unranked-identity');identity.append(textElement('strong',row.name),textElement('small','Nessuna partita completata'));
+      button.append(identity,textElement('span',formatSP(row.rating)+' SP','unranked-points'));
+      button.addEventListener('click',()=>openHomePlayerProfile(row.name,button));list.appendChild(button);
+    });group.appendChild(list);container.appendChild(group);
+  }
+
 }
 
 
@@ -1128,7 +1147,7 @@ async function assertMatchEditable(transaction, match) {
 }
 
 function calculateSeasonAwards(matches, roster, seasonId) {
-  const ranking = calculateSeasonState(matches, roster, seasonId).ranking;
+  const ranking = getMonthlyRankingRows(calculateSeasonState(matches, roster, seasonId).ranking);
   const completedCount = matches.filter(match => match.status === 'completed' && match.seasonId === seasonId).length;
   const podium = [];
   let previousRating, position = 0;
@@ -2825,6 +2844,7 @@ function createPassRecord(row){
   const record=textElement('span','','pass-record');record.append(textElement('span',row.wins+' V','sp-positive'),textElement('span',row.losses+' P','sp-negative'),textElement('span',formatPlayerWinRate(row),'sp-gold'));return record;
 }
 function renderRankSeal(container,rows,name){
+  rows=getMonthlyRankingRows(rows);
   container.replaceChildren();const row=rows.find(item=>item.name===name);
   if(!row){container.className='rank-seal rank-unranked';container.textContent='—';container.setAttribute('aria-label','Posizione non disponibile');return;}
   const position=rows.findIndex(item=>item.rating===row.rating)+1;
